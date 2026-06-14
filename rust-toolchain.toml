@@ -1,0 +1,5 @@
+[toolchain]
+# Pinned so benchmark provenance can identify the exact compiler used for the
+# Rust binary. Container image identity is recorded separately by the harness.
+channel = "1.94.1"
+components = ["rustfmt", "clippy"]

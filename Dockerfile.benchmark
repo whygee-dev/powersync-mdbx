@@ -1,0 +1,40 @@
+# This image is for the symmetric benchmark runner. Publication runs execute a
+# registry image pinned by digest; these defaults are only a reproducible local
+# build path.
+ARG RUST_BUILDER_IMAGE=rust:1.94.1-bookworm
+ARG RUST_RUNTIME_IMAGE=debian:bookworm-slim
+FROM ${RUST_BUILDER_IMAGE} AS builder
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+      build-essential \
+      clang \
+      cmake \
+      libclang-dev \
+      libpq-dev \
+      pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /source
+COPY Cargo.toml Cargo.lock ./
+COPY crates/powersync-mdbx/Cargo.toml crates/powersync-mdbx/Cargo.toml
+RUN mkdir -p crates/powersync-mdbx/src \
+    && printf 'fn main() {}\n' > crates/powersync-mdbx/src/main.rs \
+    && printf '\n' > crates/powersync-mdbx/src/lib.rs \
+    && cargo build --locked --release --package powersync-mdbx \
+    && rm -rf crates/powersync-mdbx/src
+
+COPY crates/powersync-mdbx crates/powersync-mdbx
+RUN touch crates/powersync-mdbx/src/main.rs crates/powersync-mdbx/src/lib.rs \
+    && cargo build --locked --release --package powersync-mdbx
+
+FROM ${RUST_RUNTIME_IMAGE}
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates libpq5 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /source/target/release/powersync-mdbx /usr/local/bin/powersync-mdbx
+
+EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/powersync-mdbx"]

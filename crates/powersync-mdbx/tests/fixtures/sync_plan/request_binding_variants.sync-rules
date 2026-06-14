@@ -1,0 +1,12 @@
+edition: 3
+compatibility_version: 1
+storage_version: 1
+streams:
+  tasks_by_request_project:
+    query: SELECT * FROM public.tasks WHERE project_id = request.parameters() ->> 'project_id'
+  tasks_by_subscription_org:
+    query: SELECT * FROM public.tasks WHERE org_id = subscription.parameter('org_id')
+  tasks_by_jwt_org:
+    query: SELECT * FROM public.tasks WHERE org_id = request.jwt() ->> 'org_id'
+  tasks_by_user:
+    query: SELECT * FROM public.tasks WHERE assignee_id = request.user_id()

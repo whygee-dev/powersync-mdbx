@@ -1,0 +1,7 @@
+edition: 3
+compatibility_version: 1
+storage_version: 1
+streams:
+  tasks:
+    auto_subscribe: true
+    query: SELECT * FROM private.tasks

@@ -1,0 +1,11 @@
+edition: 3
+compatibility_version: 1
+storage_version: 1
+streams:
+  tickets:
+    auto_subscribe: true
+    query: SELECT * FROM public.tickets
+  tickets_by_queue:
+    query: SELECT id AS ticket_id, queue_id, title FROM public.tickets WHERE queue_id = auth.parameter('queue_id')
+  tickets_by_status:
+    query: SELECT id AS ticket_id, status FROM public.tickets WHERE status = auth.parameter('status')

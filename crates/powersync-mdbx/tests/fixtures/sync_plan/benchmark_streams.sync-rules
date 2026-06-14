@@ -1,0 +1,23 @@
+edition: 3
+compatibility_version: 1
+storage_version: 1
+streams:
+  tasks:
+    auto_subscribe: true
+    query: SELECT * FROM public.tasks
+  tasks_by_project:
+    query: SELECT * FROM public.tasks WHERE project_id = auth.parameter('project_id')
+  tasks_by_org:
+    query: SELECT * FROM public.tasks WHERE org_id = auth.parameter('org_id')
+  projects_by_org:
+    query: SELECT * FROM public.projects WHERE org_id = auth.parameter('org_id')
+  projects_by_owner:
+    query: SELECT * FROM public.projects WHERE owner_id = auth.parameter('owner_id')
+  comments_by_task:
+    query: SELECT * FROM public.comments WHERE task_id = auth.parameter('task_id')
+  comments_by_org:
+    query: SELECT * FROM public.comments WHERE org_id = auth.parameter('org_id')
+  memberships_by_org:
+    query: SELECT * FROM public.memberships WHERE org_id = auth.parameter('org_id')
+  organizations_by_region:
+    query: SELECT * FROM public.organizations WHERE region = auth.parameter('region')

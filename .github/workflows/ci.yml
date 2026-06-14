@@ -1,0 +1,105 @@
+name: CI
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Install Rust toolchain (pinned by rust-toolchain.toml)
+        run: rustup show
+
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+
+      - name: cargo fmt
+        run: cargo fmt -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+
+      - name: cargo test
+        run: cargo test --locked -q
+
+      - name: cargo audit
+        run: |
+          cargo install cargo-audit --version 0.22.2 --locked
+          cargo audit
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: harness checks
+        run: |
+          node --check scripts/user_value_benchmark.mjs
+          node --check scripts/linux_canary_ladder.mjs
+          node --check scripts/export_artifacts.mjs
+          node --test scripts/user_value_benchmark.test.mjs scripts/export_artifacts.test.mjs scripts/linux_canary_ladder.test.mjs
+
+      - name: e2e build
+        run: |
+          npm --prefix e2e/official-sdk ci
+          npm --prefix e2e/official-sdk audit
+          npm --prefix e2e/official-sdk run build
+
+  live-replication:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Install Rust toolchain (pinned by rust-toolchain.toml)
+        run: rustup show
+
+      - name: Start logical-replication PostgreSQL
+        run: |
+          docker compose \
+            --project-name powersync_mdbx_ci \
+            -f compose.yaml \
+            -f .github/compose.ci.yaml \
+            up -d postgres
+          # alpine/socat, resolved 2026-07-11
+          docker run -d --rm \
+            --name powersync_mdbx_ci_forwarder \
+            --network powersync_mdbx_ci_default \
+            -p 127.0.0.1:55432:15432 \
+            alpine/socat@sha256:d85531a29ef5ba99dfb4717485c239307e2902d522a1bc010992a2728c92cfad \
+            tcp-listen:15432,fork,reuseaddr tcp:postgres:5432
+          for _ in $(seq 1 30); do
+            if docker exec powersync_mdbx_ci-postgres-1 pg_isready -U postgres -d powersync_benchmark_test; then
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+
+      - name: Live replication smoke tests
+        env:
+          POWERSYNC_RUST_LIVE_TEST_POSTGRES_URI: postgres://postgres:postgres@127.0.0.1:55432/powersync_benchmark_test?sslmode=disable
+        run: cargo test --locked --test replication_smoke -- --ignored --test-threads=1
+
+      - name: Stop test services
+        if: always()
+        run: |
+          docker rm -f powersync_mdbx_ci_forwarder 2>/dev/null || true
+          docker compose \
+            --project-name powersync_mdbx_ci \
+            -f compose.yaml \
+            -f .github/compose.ci.yaml \
+            down -v --remove-orphans

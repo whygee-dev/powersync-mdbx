@@ -1,0 +1,10 @@
+node_modules
+public
+dist
+test-results
+playwright-report
+.vite
+.vite-temp
+powersync-benchmark-e2e.db
+powersync-benchmark-e2e.db-shm
+powersync-benchmark-e2e.db-wal

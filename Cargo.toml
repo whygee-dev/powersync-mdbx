@@ -1,0 +1,9 @@
+[workspace]
+members = ["crates/powersync-mdbx"]
+resolver = "2"
+
+# Keep release code-generation settings explicit so benchmark provenance can
+# identify the binary's build profile.
+[profile.release]
+lto = "thin"
+codegen-units = 1

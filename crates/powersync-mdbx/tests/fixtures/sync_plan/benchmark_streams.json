@@ -1,0 +1,170 @@
+{
+  "version": 1,
+  "edition": 3,
+  "compatibility_version": 1,
+  "storage_version": 1,
+  "streams": [
+    {
+      "name": "tasks",
+      "source_table": "tasks",
+      "output_table": "tasks",
+      "auto_subscribe": true,
+      "bucket_parameters": [],
+      "projection": {
+        "type": "star"
+      }
+    },
+    {
+      "name": "tasks_by_project",
+      "source_table": "tasks",
+      "output_table": "tasks",
+      "auto_subscribe": false,
+      "bucket_parameters": [
+        {
+          "name": "project_id",
+          "source_column": "project_id",
+          "binding": {
+            "type": "auth_parameter",
+            "name": "project_id"
+          }
+        }
+      ],
+      "projection": {
+        "type": "star"
+      }
+    },
+    {
+      "name": "tasks_by_org",
+      "source_table": "tasks",
+      "output_table": "tasks",
+      "auto_subscribe": false,
+      "bucket_parameters": [
+        {
+          "name": "org_id",
+          "source_column": "org_id",
+          "binding": {
+            "type": "auth_parameter",
+            "name": "org_id"
+          }
+        }
+      ],
+      "projection": {
+        "type": "star"
+      }
+    },
+    {
+      "name": "projects_by_org",
+      "source_table": "projects",
+      "output_table": "projects",
+      "auto_subscribe": false,
+      "bucket_parameters": [
+        {
+          "name": "org_id",
+          "source_column": "org_id",
+          "binding": {
+            "type": "auth_parameter",
+            "name": "org_id"
+          }
+        }
+      ],
+      "projection": {
+        "type": "star"
+      }
+    },
+    {
+      "name": "projects_by_owner",
+      "source_table": "projects",
+      "output_table": "projects",
+      "auto_subscribe": false,
+      "bucket_parameters": [
+        {
+          "name": "owner_id",
+          "source_column": "owner_id",
+          "binding": {
+            "type": "auth_parameter",
+            "name": "owner_id"
+          }
+        }
+      ],
+      "projection": {
+        "type": "star"
+      }
+    },
+    {
+      "name": "comments_by_task",
+      "source_table": "comments",
+      "output_table": "comments",
+      "auto_subscribe": false,
+      "bucket_parameters": [
+        {
+          "name": "task_id",
+          "source_column": "task_id",
+          "binding": {
+            "type": "auth_parameter",
+            "name": "task_id"
+          }
+        }
+      ],
+      "projection": {
+        "type": "star"
+      }
+    },
+    {
+      "name": "comments_by_org",
+      "source_table": "comments",
+      "output_table": "comments",
+      "auto_subscribe": false,
+      "bucket_parameters": [
+        {
+          "name": "org_id",
+          "source_column": "org_id",
+          "binding": {
+            "type": "auth_parameter",
+            "name": "org_id"
+          }
+        }
+      ],
+      "projection": {
+        "type": "star"
+      }
+    },
+    {
+      "name": "memberships_by_org",
+      "source_table": "memberships",
+      "output_table": "memberships",
+      "auto_subscribe": false,
+      "bucket_parameters": [
+        {
+          "name": "org_id",
+          "source_column": "org_id",
+          "binding": {
+            "type": "auth_parameter",
+            "name": "org_id"
+          }
+        }
+      ],
+      "projection": {
+        "type": "star"
+      }
+    },
+    {
+      "name": "organizations_by_region",
+      "source_table": "organizations",
+      "output_table": "organizations",
+      "auto_subscribe": false,
+      "bucket_parameters": [
+        {
+          "name": "region",
+          "source_column": "region",
+          "binding": {
+            "type": "auth_parameter",
+            "name": "region"
+          }
+        }
+      ],
+      "projection": {
+        "type": "star"
+      }
+    }
+  ]
+}

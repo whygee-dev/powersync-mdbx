@@ -1,0 +1,891 @@
+===== multi_query_subscription_params =====
+{
+  "version": 1,
+  "edition": 3,
+  "compatibility_version": 1,
+  "storage_version": 1,
+  "streams": [
+    {
+      "name": "workspace",
+      "source_table": "projects",
+      "output_table": "projects",
+      "auto_subscribe": false,
+      "bucket_parameters": [
+        {
+          "name": "org_id",
+          "source_column": "org_id",
+          "binding": {
+            "type": "subscription_parameter",
+            "name": "org_id"
+          }
+        }
+      ],
+      "projection": {
+        "type": "star"
+      }
+    },
+    {
+      "name": "inbox",
+      "source_table": "tasks",
+      "output_table": "tasks",
+      "auto_subscribe": false,
+      "bucket_parameters": [
+        {
+          "name": "org_id",
+          "source_column": "org_id",
+          "binding": {
+            "type": "subscription_parameter",
+            "name": "org_id"
+          }
+        }
+      ],
+      "projection": {
+        "type": "star"
+      },
+      "data_queries": [
+        {
+          "source_table": "tasks",
+          "output_table": "tasks",
+          "bucket_parameters": [
+            {
+              "name": "org_id",
+              "source_column": "org_id",
+              "binding": {
+                "type": "subscription_parameter",
+                "name": "org_id"
+              }
+            }
+          ],
+          "projection": {
+            "type": "star"
+          }
+        },
+        {
+          "source_table": "comments",
+          "output_table": "comments",
+          "bucket_parameters": [
+            {
+              "name": "org_id",
+              "source_column": "org_id",
+              "binding": {
+                "type": "subscription_parameter",
+                "name": "org_id"
+              }
+            }
+          ],
+          "projection": {
+            "type": "columns",
+            "columns": [
+              {
+                "source_column": "id",
+                "alias": "comment_id"
+              },
+              {
+                "source_column": "task_id",
+                "alias": "task_id"
+              },
+              {
+                "source_column": "org_id",
+                "alias": "org_id"
+              },
+              {
+                "source_column": "body",
+                "alias": "body"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
+
+===== edition3_with_queries_and_request_filters =====
+{
+  "version": 1,
+  "edition": 3,
+  "compatibility_version": 1,
+  "storage_version": 1,
+  "streams": [
+    {
+      "name": "web_workspaces",
+      "source_table": "Workspace",
+      "output_table": "Workspace",
+      "auto_subscribe": true,
+      "bucket_parameters": [
+        {
+          "name": "workspaceId",
+          "source_column": "workspaceId",
+          "binding": {
+            "type": "parameter_query_column",
+            "name": "workspaceId",
+            "query": "SELECT \"workspaceId\" AS \"workspaceId\" FROM \"Membership\" WHERE connection.parameters() ->> 'schema_version' = 'web' AND \"userId\" = auth.user_id() AND \"workspaceId\" IS NOT NULL AND \"teamId\" = connection.parameters() ->> 'selectedTeamId'"
+          }
+        },
+        {
+          "name": "selectedTeamId",
+          "source_column": "selectedTeamId",
+          "binding": {
+            "type": "request_parameter",
+            "name": "selectedTeamId"
+          }
+        }
+      ],
+      "row_filter": {
+        "type": "is_null",
+        "operand": {
+          "type": "column",
+          "name": "archivedAt"
+        },
+        "negated": false
+      },
+      "request_filter": {
+        "type": "eq",
+        "left": {
+          "type": "binding",
+          "binding": {
+            "type": "request_parameter",
+            "name": "schema_version"
+          }
+        },
+        "right": {
+          "type": "literal",
+          "value": {
+            "type": "string",
+            "value": "web"
+          }
+        }
+      },
+      "projection": {
+        "type": "star"
+      },
+      "data_queries": [
+        {
+          "source_table": "Workspace",
+          "output_table": "Workspace",
+          "bucket_parameters": [
+            {
+              "name": "workspaceId",
+              "source_column": "id",
+              "binding": {
+                "type": "parameter_query_column",
+                "name": "workspaceId",
+                "query": "SELECT \"workspaceId\" AS \"workspaceId\" FROM \"Membership\" WHERE connection.parameters() ->> 'schema_version' = 'web' AND \"userId\" = auth.user_id() AND \"workspaceId\" IS NOT NULL AND \"teamId\" = connection.parameters() ->> 'selectedTeamId'"
+              }
+            }
+          ],
+          "row_filter": {
+            "type": "is_null",
+            "operand": {
+              "type": "column",
+              "name": "archivedAt"
+            },
+            "negated": false
+          },
+          "request_filter": {
+            "type": "eq",
+            "left": {
+              "type": "binding",
+              "binding": {
+                "type": "request_parameter",
+                "name": "schema_version"
+              }
+            },
+            "right": {
+              "type": "literal",
+              "value": {
+                "type": "string",
+                "value": "web"
+              }
+            }
+          },
+          "projection": {
+            "type": "star"
+          }
+        },
+        {
+          "source_table": "WorkspaceSetting",
+          "output_table": "WorkspaceSetting",
+          "bucket_parameters": [
+            {
+              "name": "selectedTeamId",
+              "source_column": "teamId",
+              "binding": {
+                "type": "request_parameter",
+                "name": "selectedTeamId"
+              }
+            }
+          ],
+          "row_filter": {
+            "type": "or",
+            "terms": [
+              {
+                "type": "is_null",
+                "operand": {
+                  "type": "column",
+                  "name": "archivedAt"
+                },
+                "negated": false
+              },
+              {
+                "type": "is_null",
+                "operand": {
+                  "type": "column",
+                  "name": "flagValue"
+                },
+                "negated": true
+              }
+            ]
+          },
+          "request_filter": {
+            "type": "eq",
+            "left": {
+              "type": "binding",
+              "binding": {
+                "type": "request_parameter",
+                "name": "schema_version"
+              }
+            },
+            "right": {
+              "type": "literal",
+              "value": {
+                "type": "string",
+                "value": "web"
+              }
+            }
+          },
+          "projection": {
+            "type": "star"
+          }
+        }
+      ]
+    },
+    {
+      "name": "web_generic",
+      "source_table": "Document",
+      "output_table": "Document",
+      "auto_subscribe": false,
+      "bucket_parameters": [],
+      "request_filter": {
+        "type": "or",
+        "terms": [
+          {
+            "type": "eq",
+            "left": {
+              "type": "binding",
+              "binding": {
+                "type": "request_parameter",
+                "name": "schema_version"
+              }
+            },
+            "right": {
+              "type": "literal",
+              "value": {
+                "type": "string",
+                "value": "web"
+              }
+            }
+          },
+          {
+            "type": "eq",
+            "left": {
+              "type": "binding",
+              "binding": {
+                "type": "request_parameter",
+                "name": "schema_version"
+              }
+            },
+            "right": {
+              "type": "literal",
+              "value": {
+                "type": "string",
+                "value": "mobile"
+              }
+            }
+          }
+        ]
+      },
+      "projection": {
+        "type": "star"
+      },
+      "data_queries": [
+        {
+          "source_table": "Document",
+          "output_table": "Document",
+          "bucket_parameters": [],
+          "request_filter": {
+            "type": "or",
+            "terms": [
+              {
+                "type": "eq",
+                "left": {
+                  "type": "binding",
+                  "binding": {
+                    "type": "request_parameter",
+                    "name": "schema_version"
+                  }
+                },
+                "right": {
+                  "type": "literal",
+                  "value": {
+                    "type": "string",
+                    "value": "web"
+                  }
+                }
+              },
+              {
+                "type": "eq",
+                "left": {
+                  "type": "binding",
+                  "binding": {
+                    "type": "request_parameter",
+                    "name": "schema_version"
+                  }
+                },
+                "right": {
+                  "type": "literal",
+                  "value": {
+                    "type": "string",
+                    "value": "mobile"
+                  }
+                }
+              }
+            ]
+          },
+          "projection": {
+            "type": "star"
+          }
+        }
+      ]
+    }
+  ]
+}
+
+===== residual_row_filter =====
+{
+  "version": 1,
+  "edition": 3,
+  "compatibility_version": 1,
+  "storage_version": 1,
+  "streams": [
+    {
+      "name": "tickets",
+      "source_table": "Ticket",
+      "output_table": "Ticket",
+      "auto_subscribe": false,
+      "bucket_parameters": [
+        {
+          "name": "workspaceId",
+          "source_column": "workspaceId",
+          "binding": {
+            "type": "parameter_query_column",
+            "name": "workspaceId",
+            "query": "SELECT \"workspaceId\" AS \"workspaceId\" FROM \"Membership\" WHERE \"userId\" = auth.user_id()"
+          }
+        }
+      ],
+      "row_filter": {
+        "type": "and",
+        "terms": [
+          {
+            "type": "or",
+            "terms": [
+              {
+                "type": "is_null",
+                "operand": {
+                  "type": "column",
+                  "name": "archivedAt"
+                },
+                "negated": false
+              },
+              {
+                "type": "is_null",
+                "operand": {
+                  "type": "column",
+                  "name": "flagChecked"
+                },
+                "negated": false
+              }
+            ]
+          },
+          {
+            "type": "is_null",
+            "operand": {
+              "type": "column",
+              "name": "parentId"
+            },
+            "negated": true
+          }
+        ]
+      },
+      "projection": {
+        "type": "star"
+      },
+      "data_queries": [
+        {
+          "source_table": "Ticket",
+          "output_table": "Ticket",
+          "bucket_parameters": [
+            {
+              "name": "workspaceId",
+              "source_column": "workspaceId",
+              "binding": {
+                "type": "parameter_query_column",
+                "name": "workspaceId",
+                "query": "SELECT \"workspaceId\" AS \"workspaceId\" FROM \"Membership\" WHERE \"userId\" = auth.user_id()"
+              }
+            }
+          ],
+          "row_filter": {
+            "type": "and",
+            "terms": [
+              {
+                "type": "or",
+                "terms": [
+                  {
+                    "type": "is_null",
+                    "operand": {
+                      "type": "column",
+                      "name": "archivedAt"
+                    },
+                    "negated": false
+                  },
+                  {
+                    "type": "is_null",
+                    "operand": {
+                      "type": "column",
+                      "name": "flagChecked"
+                    },
+                    "negated": false
+                  }
+                ]
+              },
+              {
+                "type": "is_null",
+                "operand": {
+                  "type": "column",
+                  "name": "parentId"
+                },
+                "negated": true
+              }
+            ]
+          },
+          "projection": {
+            "type": "star"
+          }
+        }
+      ]
+    }
+  ]
+}
+
+===== array_column_in_route =====
+{
+  "version": 1,
+  "edition": 3,
+  "compatibility_version": 1,
+  "storage_version": 1,
+  "streams": [
+    {
+      "name": "issues",
+      "source_table": "Issue",
+      "output_table": "Issue",
+      "auto_subscribe": false,
+      "bucket_parameters": [
+        {
+          "name": "workspaceId",
+          "source_column": "workspaceId",
+          "binding": {
+            "type": "parameter_query_column",
+            "name": "workspaceId",
+            "query": "SELECT \"workspaceId\" AS \"workspaceId\" FROM \"Membership\" WHERE \"userId\" = auth.user_id()"
+          }
+        }
+      ],
+      "row_filter": {
+        "type": "is_null",
+        "operand": {
+          "type": "column",
+          "name": "archivedAt"
+        },
+        "negated": false
+      },
+      "projection": {
+        "type": "star"
+      },
+      "data_queries": [
+        {
+          "source_table": "Issue",
+          "output_table": "Issue",
+          "bucket_parameters": [
+            {
+              "name": "workspaceId",
+              "source_column": "workspaceIds",
+              "binding": {
+                "type": "parameter_query_column",
+                "name": "workspaceId",
+                "query": "SELECT \"workspaceId\" AS \"workspaceId\" FROM \"Membership\" WHERE \"userId\" = auth.user_id()"
+              }
+            }
+          ],
+          "row_filter": {
+            "type": "is_null",
+            "operand": {
+              "type": "column",
+              "name": "archivedAt"
+            },
+            "negated": false
+          },
+          "projection": {
+            "type": "star"
+          }
+        }
+      ]
+    }
+  ]
+}
+
+===== computed_id_star_projection =====
+{
+  "version": 1,
+  "edition": 3,
+  "compatibility_version": 1,
+  "storage_version": 1,
+  "streams": [
+    {
+      "name": "issue_label",
+      "source_table": "_IssueToLabel",
+      "output_table": "_IssueToLabel",
+      "auto_subscribe": false,
+      "bucket_parameters": [
+        {
+          "name": "teamId",
+          "source_column": "teamId",
+          "binding": {
+            "type": "subscription_parameter",
+            "name": "teamId"
+          }
+        }
+      ],
+      "projection": {
+        "type": "star_with_computed",
+        "computed": [
+          {
+            "alias": "id",
+            "expression": {
+              "terms": [
+                {
+                  "type": "column",
+                  "source_column": "A"
+                },
+                {
+                  "type": "literal",
+                  "value": "."
+                },
+                {
+                  "type": "column",
+                  "source_column": "B"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
+
+===== json_each_request_parameter_expansion =====
+{
+  "version": 1,
+  "edition": 3,
+  "compatibility_version": 1,
+  "storage_version": 1,
+  "streams": [
+    {
+      "name": "program",
+      "source_table": "Activity",
+      "output_table": "Activity",
+      "auto_subscribe": false,
+      "bucket_parameters": [
+        {
+          "name": "workspaceIds",
+          "source_column": "workspaceIds",
+          "binding": {
+            "type": "request_parameter_array",
+            "name": "workspaceIds"
+          }
+        },
+        {
+          "name": "projectIds",
+          "source_column": "projectIds",
+          "binding": {
+            "type": "request_parameter_array",
+            "name": "projectIds"
+          }
+        }
+      ],
+      "row_filter": {
+        "type": "is_null",
+        "operand": {
+          "type": "column",
+          "name": "archivedAt"
+        },
+        "negated": false
+      },
+      "projection": {
+        "type": "star"
+      },
+      "data_queries": [
+        {
+          "source_table": "Activity",
+          "output_table": "Activity",
+          "bucket_parameters": [
+            {
+              "name": "workspaceIds",
+              "source_column": "workspaceId",
+              "binding": {
+                "type": "request_parameter_array",
+                "name": "workspaceIds"
+              }
+            },
+            {
+              "name": "projectIds",
+              "source_column": "projectId",
+              "binding": {
+                "type": "request_parameter_array",
+                "name": "projectIds"
+              }
+            }
+          ],
+          "row_filter": {
+            "type": "is_null",
+            "operand": {
+              "type": "column",
+              "name": "archivedAt"
+            },
+            "negated": false
+          },
+          "projection": {
+            "type": "star"
+          }
+        }
+      ]
+    }
+  ]
+}
+
+===== admin_scope_auth_parameter =====
+{
+  "version": 1,
+  "edition": 3,
+  "compatibility_version": 1,
+  "storage_version": 1,
+  "streams": [
+    {
+      "name": "admin_lists",
+      "source_table": "List",
+      "output_table": "List",
+      "auto_subscribe": false,
+      "bucket_parameters": [],
+      "row_filter": {
+        "type": "is_null",
+        "operand": {
+          "type": "column",
+          "name": "teamId"
+        },
+        "negated": false
+      },
+      "request_filter": {
+        "type": "eq",
+        "left": {
+          "type": "binding",
+          "binding": {
+            "type": "auth_parameter",
+            "name": "admin"
+          }
+        },
+        "right": {
+          "type": "literal",
+          "value": {
+            "type": "boolean",
+            "value": true
+          }
+        }
+      },
+      "projection": {
+        "type": "star"
+      },
+      "data_queries": [
+        {
+          "source_table": "List",
+          "output_table": "List",
+          "bucket_parameters": [],
+          "row_filter": {
+            "type": "is_null",
+            "operand": {
+              "type": "column",
+              "name": "teamId"
+            },
+            "negated": false
+          },
+          "request_filter": {
+            "type": "eq",
+            "left": {
+              "type": "binding",
+              "binding": {
+                "type": "auth_parameter",
+                "name": "admin"
+              }
+            },
+            "right": {
+              "type": "literal",
+              "value": {
+                "type": "boolean",
+                "value": true
+              }
+            }
+          },
+          "projection": {
+            "type": "star"
+          }
+        }
+      ]
+    }
+  ]
+}
+
+===== non_null_request_guard =====
+{
+  "version": 1,
+  "edition": 3,
+  "compatibility_version": 1,
+  "storage_version": 1,
+  "streams": [
+    {
+      "name": "workspaces",
+      "source_table": "Workspace",
+      "output_table": "Workspace",
+      "auto_subscribe": false,
+      "bucket_parameters": [
+        {
+          "name": "workspaceIds",
+          "source_column": "workspaceIds",
+          "binding": {
+            "type": "request_parameter_array",
+            "name": "workspaceIds"
+          }
+        }
+      ],
+      "request_filter": {
+        "type": "is_null",
+        "operand": {
+          "type": "binding",
+          "binding": {
+            "type": "request_parameter",
+            "name": "workspaceIds"
+          }
+        },
+        "negated": true
+      },
+      "projection": {
+        "type": "star"
+      },
+      "data_queries": [
+        {
+          "source_table": "Workspace",
+          "output_table": "Workspace",
+          "bucket_parameters": [
+            {
+              "name": "workspaceIds",
+              "source_column": "id",
+              "binding": {
+                "type": "request_parameter_array",
+                "name": "workspaceIds"
+              }
+            }
+          ],
+          "request_filter": {
+            "type": "is_null",
+            "operand": {
+              "type": "binding",
+              "binding": {
+                "type": "request_parameter",
+                "name": "workspaceIds"
+              }
+            },
+            "negated": true
+          },
+          "projection": {
+            "type": "star"
+          }
+        }
+      ]
+    }
+  ]
+}
+
+===== request_gated_auto_subscribe =====
+{
+  "version": 1,
+  "edition": 3,
+  "compatibility_version": 1,
+  "storage_version": 1,
+  "streams": [
+    {
+      "name": "web_entities",
+      "source_table": "Entity",
+      "output_table": "Entity",
+      "auto_subscribe": true,
+      "bucket_parameters": [],
+      "request_filter": {
+        "type": "eq",
+        "left": {
+          "type": "binding",
+          "binding": {
+            "type": "request_parameter",
+            "name": "schema_version"
+          }
+        },
+        "right": {
+          "type": "literal",
+          "value": {
+            "type": "string",
+            "value": "web"
+          }
+        }
+      },
+      "projection": {
+        "type": "star"
+      },
+      "data_queries": [
+        {
+          "source_table": "Entity",
+          "output_table": "Entity",
+          "bucket_parameters": [],
+          "request_filter": {
+            "type": "eq",
+            "left": {
+              "type": "binding",
+              "binding": {
+                "type": "request_parameter",
+                "name": "schema_version"
+              }
+            },
+            "right": {
+              "type": "literal",
+              "value": {
+                "type": "string",
+                "value": "web"
+              }
+            }
+          },
+          "projection": {
+            "type": "star"
+          }
+        }
+      ]
+    }
+  ]
+}
+

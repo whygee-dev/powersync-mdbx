@@ -1,0 +1,85 @@
+===== residual_row_filter =====
+match: deleted null, flag null, component set: true
+filtered: deleted set, flag true, component set: false
+match: deleted set, flag null, component set: true
+filtered: component null: false
+filtered: component missing: false
+wrong object type: false
+===== array_column_in_route =====
+match: ws-1 in array, not deleted: true
+no match: array lacks ws-1: true
+filtered: deleted: false
+===== request_filter_schema_version_or =====
+web: true
+mobile: true
+api: false
+MISSING: false
+===== request_filter_auth_admin =====
+true: true
+false: false
+MISSING: false
+===== row_eq_number_coercion (col = 5) =====
+rank number 5: true
+rank string "5" coerces: true
+rank number 6: false
+rank missing: false
+===== row_eq_number_coercion (5 = col, directional) =====
+rank number 5: true
+rank string "5" does NOT coerce (literal-left): false
+===== row_eq_bool_coercion (flag = true) =====
+flag bool true: true
+flag string "true" coerces: true
+flag bool false: false
+===== row_in_column (tag IN tags) =====
+tag in array: true
+tag not in array: false
+tags scalar equal: true
+tags scalar different: false
+tags missing: false
+===== row_is_null (archivedAt IS NULL) =====
+missing key is null -> true: true
+json null -> true: true
+value -> false: false
+empty string is NOT null in row context -> false: false
+===== array_route_membership (bucket value ws-1, vary route) =====
+route array contains ws-1 -> true: true
+route array lacks ws-1 -> false: false
+route scalar equals ws-1 -> true: true
+route scalar differs -> false: false
+===== row_three_way_or (a IS NULL OR b IS NULL OR rank = 5) =====
+first branch: a null: true
+second branch: b null: true
+third branch: rank = 5: true
+none: all set, rank != 5: false
+===== row_double_parens ((archivedAt IS NULL)) =====
+null -> true: true
+set -> false: false
+===== request_is_null (team IS NULL) =====
+present non-empty -> false: false
+empty string -> true: true
+missing -> true: true
+===== request_reversed_literal ('web' = schema_version) =====
+web: true
+mobile: false
+MISSING: false
+===== request_multi_and (schema_version = web AND team = eu) =====
+both match -> true: true
+team wrong -> false: false
+schema wrong -> false: false
+===== no_filter_fast_path =====
+arbitrary data matches (no row filter): true
+empty object matches: true
+request_filter_matches(None) -> true: true
+===== default_bucket_request_filter_threading (count of matched buckets) =====
+web: 1
+mobile: 0
+MISSING: 0
+===== row_literal_token_is_null (5 IS NULL => column "5") =====
+column "5" absent -> true: true
+column "5" present non-null -> false: false
+column "5" present json-null -> true: true
+===== row_literal_token_is_not_null (5 IS NOT NULL => column "5") =====
+column "5" absent -> false: false
+column "5" present -> true: true
+===== row_quoted_literal_is_null ('x' IS NULL => column "x") =====
+column "x" absent -> true: true

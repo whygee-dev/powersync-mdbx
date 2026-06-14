@@ -1,0 +1,677 @@
+{
+  "profile": "1m",
+  "sourceTaskRows": 1000402,
+  "targets": [
+    "official",
+    "rust"
+  ],
+  "sampleCount": 5,
+  "percentileMethod": "linear interpolation over successful samples, same as scripts/user_value_benchmark.mjs",
+  "config": {
+    "accessMode": "auth_perimeter",
+    "projectBucketSampleCount": 1000,
+    "authPerimeterRows": 1001,
+    "churnRowsPerBucket": 10,
+    "bucketProbeBatchSize": 25,
+    "processingOnly": true,
+    "warmupPairs": 1,
+    "churnGateMode": "slot-lsn",
+    "officialImage": "journeyapps/powersync-service:1.21.0",
+    "interleavedTargets": true,
+    "executionSchedule": [
+      {
+        "lane": "endUserWarmup",
+        "repeat": 1,
+        "target": "official"
+      },
+      {
+        "lane": "endUserWarmup",
+        "repeat": 1,
+        "target": "rust"
+      },
+      {
+        "lane": "endUser",
+        "repeat": 1,
+        "target": "official"
+      },
+      {
+        "lane": "endUser",
+        "repeat": 1,
+        "target": "rust"
+      },
+      {
+        "lane": "endUser",
+        "repeat": 2,
+        "target": "rust"
+      },
+      {
+        "lane": "endUser",
+        "repeat": 2,
+        "target": "official"
+      },
+      {
+        "lane": "endUser",
+        "repeat": 3,
+        "target": "official"
+      },
+      {
+        "lane": "endUser",
+        "repeat": 3,
+        "target": "rust"
+      },
+      {
+        "lane": "endUser",
+        "repeat": 4,
+        "target": "rust"
+      },
+      {
+        "lane": "endUser",
+        "repeat": 4,
+        "target": "official"
+      },
+      {
+        "lane": "endUser",
+        "repeat": 5,
+        "target": "official"
+      },
+      {
+        "lane": "endUser",
+        "repeat": 5,
+        "target": "rust"
+      }
+    ],
+    "coldOpenReadiness": "control-plane only; no pre-measurement sync probe",
+    "protocolValidator": {
+      "sdk": "@powersync/common",
+      "version": "1.51.0",
+      "publicExports": [
+        "isStreamingKeepalive",
+        "isStreamingSyncCheckpoint",
+        "isStreamingSyncCheckpointComplete",
+        "isStreamingSyncData"
+      ]
+    }
+  },
+  "timing": {
+    "official": {
+      "processingMs": {
+        "count": 5,
+        "min": 56713.602,
+        "p50": 57886.216,
+        "p95": 61097.819,
+        "mean": 58650.848,
+        "max": 61477.981
+      },
+      "churnApplySqlMs": {
+        "count": 5,
+        "min": 65411.488,
+        "p50": 66407.483,
+        "p95": 69749.477,
+        "mean": 67282.084,
+        "max": 69980.712
+      },
+      "churnReplicationCatchupMs": {
+        "count": 5,
+        "min": 6482.345,
+        "p50": 10422.295,
+        "p95": 11580.435,
+        "mean": 9314.97,
+        "max": 11709.162
+      },
+      "churnSlotAckCatchupMs": {
+        "count": 5,
+        "min": 6482.345,
+        "p50": 10422.295,
+        "p95": 11580.435,
+        "mean": 9314.97,
+        "max": 11709.162
+      },
+      "churnProtocolProbeMs": {
+        "count": 5,
+        "min": 720.912,
+        "p50": 742.181,
+        "p95": 848.64,
+        "mean": 770.955,
+        "max": 863.518
+      },
+      "churnToProtocolVerifiedMs": {
+        "count": 5,
+        "min": 77590.22,
+        "p50": 78513.717,
+        "p95": 78764.894,
+        "mean": 78344.756,
+        "max": 78809.857
+      }
+    },
+    "rust": {
+      "processingMs": {
+        "count": 5,
+        "min": 4991.139,
+        "p50": 5046.112,
+        "p95": 5181,
+        "mean": 5073.112,
+        "max": 5197.064
+      },
+      "churnApplySqlMs": {
+        "count": 5,
+        "min": 61726.174,
+        "p50": 64849.022,
+        "p95": 72852.376,
+        "mean": 66690.387,
+        "max": 73868.672
+      },
+      "churnReplicationCatchupMs": {
+        "count": 5,
+        "min": 1663.294,
+        "p50": 1746.348,
+        "p95": 1801.716,
+        "mean": 1737.381,
+        "max": 1810.719
+      },
+      "churnSlotAckCatchupMs": {
+        "count": 5,
+        "min": 1663.294,
+        "p50": 1746.348,
+        "p95": 1801.716,
+        "mean": 1737.381,
+        "max": 1810.719
+      },
+      "churnProtocolProbeMs": {
+        "count": 5,
+        "min": 307.833,
+        "p50": 321.177,
+        "p95": 330.286,
+        "mean": 320.515,
+        "max": 330.497
+      },
+      "churnToProtocolVerifiedMs": {
+        "count": 5,
+        "min": 64775.756,
+        "p50": 67893.568,
+        "p95": 75862.402,
+        "mean": 69703.18,
+        "max": 76866.821
+      }
+    }
+  },
+  "comparison": {
+    "processing": {
+      "officialMedianMs": 57886.216,
+      "rustMedianMs": 5046.112,
+      "medianDeltaMs": -52840.104,
+      "ratioOfMedians": 11.471
+    },
+    "churnSlotAckCatchup": {
+      "officialMedianMs": 10422.295,
+      "rustMedianMs": 1746.348,
+      "medianDeltaMs": -8675.947,
+      "ratioOfMedians": 5.968
+    },
+    "churnProtocolProbe": {
+      "officialMedianMs": 742.181,
+      "rustMedianMs": 321.177,
+      "medianDeltaMs": -421.004,
+      "ratioOfMedians": 2.311
+    },
+    "churnToProtocolVerified": {
+      "officialMedianMs": 78513.717,
+      "rustMedianMs": 67893.568,
+      "medianDeltaMs": -10620.149,
+      "ratioOfMedians": 1.156
+    }
+  },
+  "parity": {
+    "status": "passed",
+    "initial": {
+      "official": {
+        "repeats": 5,
+        "bucketsPerRepeat": [
+          1000,
+          1000,
+          1000,
+          1000,
+          1000
+        ],
+        "putsPerRepeat": [
+          1000402,
+          1000402,
+          1000402,
+          1000402,
+          1000402
+        ],
+        "removesPerRepeat": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "checkpointCountSumPerRepeat": [
+          1000402,
+          1000402,
+          1000402,
+          1000402,
+          1000402
+        ],
+        "checkpointChecksumSumPerRepeat": [
+          -45945563582,
+          -45945563582,
+          -45945563582,
+          -45945563582,
+          -45945563582
+        ],
+        "nonZeroEntryChecksumsPerRepeat": [
+          1000402,
+          1000402,
+          1000402,
+          1000402,
+          1000402
+        ],
+        "statusPerRepeat": [
+          "passed",
+          "passed",
+          "passed",
+          "passed",
+          "passed"
+        ]
+      },
+      "rust": {
+        "repeats": 5,
+        "bucketsPerRepeat": [
+          1000,
+          1000,
+          1000,
+          1000,
+          1000
+        ],
+        "putsPerRepeat": [
+          1000402,
+          1000402,
+          1000402,
+          1000402,
+          1000402
+        ],
+        "removesPerRepeat": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "checkpointCountSumPerRepeat": [
+          1000402,
+          1000402,
+          1000402,
+          1000402,
+          1000402
+        ],
+        "checkpointChecksumSumPerRepeat": [
+          -45945563582,
+          -45945563582,
+          -45945563582,
+          -45945563582,
+          -45945563582
+        ],
+        "nonZeroEntryChecksumsPerRepeat": [
+          1000402,
+          1000402,
+          1000402,
+          1000402,
+          1000402
+        ],
+        "statusPerRepeat": [
+          "passed",
+          "passed",
+          "passed",
+          "passed",
+          "passed"
+        ]
+      },
+      "officialVsRust": {
+        "repeatsCompared": 5,
+        "bucketSetsEqualAllRepeats": true,
+        "expectedRowsEqualPerBucketAllRepeats": true,
+        "putsEqualPerBucketAllRepeats": true,
+        "removesEqualPerBucketAllRepeats": true,
+        "checkpointCountEqualPerBucketAllRepeats": true,
+        "checkpointChecksumEqualPerBucketAllRepeats": true,
+        "clientOperationDigestEqualPerBucketAllRepeats": true,
+        "putDigestEqualPerBucketAllRepeats": true,
+        "semanticDigestEqualPerBucketAllRepeats": true,
+        "wireDigestEqualPerBucketAllRepeats": false
+      }
+    },
+    "authz": {
+      "status": "passed",
+      "checkpointBucketsReturnedAllZero": true,
+      "repeats": [
+        {
+          "repeat": 1,
+          "officialStatus": "passed",
+          "rustStatus": "passed",
+          "officialCheckpointBucketsReturned": 0,
+          "rustCheckpointBucketsReturned": 0
+        },
+        {
+          "repeat": 2,
+          "officialStatus": "passed",
+          "rustStatus": "passed",
+          "officialCheckpointBucketsReturned": 0,
+          "rustCheckpointBucketsReturned": 0
+        },
+        {
+          "repeat": 3,
+          "officialStatus": "passed",
+          "rustStatus": "passed",
+          "officialCheckpointBucketsReturned": 0,
+          "rustCheckpointBucketsReturned": 0
+        },
+        {
+          "repeat": 4,
+          "officialStatus": "passed",
+          "rustStatus": "passed",
+          "officialCheckpointBucketsReturned": 0,
+          "rustCheckpointBucketsReturned": 0
+        },
+        {
+          "repeat": 5,
+          "officialStatus": "passed",
+          "rustStatus": "passed",
+          "officialCheckpointBucketsReturned": 0,
+          "rustCheckpointBucketsReturned": 0
+        }
+      ]
+    },
+    "churn": {
+      "official": {
+        "repeats": 5,
+        "bucketsPerRepeat": [
+          1000,
+          1000,
+          1000,
+          1000,
+          1000
+        ],
+        "expectedInsertsPerRepeat": [
+          10000,
+          10000,
+          10000,
+          10000,
+          10000
+        ],
+        "expectedUpdatesPerRepeat": [
+          10000,
+          10000,
+          10000,
+          10000,
+          10000
+        ],
+        "expectedDeletesPerRepeat": [
+          10000,
+          10000,
+          10000,
+          10000,
+          10000
+        ],
+        "putsPerRepeat": [
+          20000,
+          20000,
+          20000,
+          20000,
+          20000
+        ],
+        "removesPerRepeat": [
+          10000,
+          10000,
+          10000,
+          10000,
+          10000
+        ],
+        "checkpointCountSumPerRepeat": [
+          1030402,
+          1030402,
+          1030402,
+          1030402,
+          1030402
+        ],
+        "expectedCheckpointCountSumPerRepeat": [
+          1030402,
+          1030402,
+          1030402,
+          1030402,
+          1030402
+        ],
+        "checkpointChecksumSumPerRepeat": [
+          -58602768069,
+          -61470241204,
+          -24041994671,
+          39845280582,
+          30265319771
+        ],
+        "expectedCheckpointChecksumSumPerRepeat": [
+          -58602768069,
+          -61470241204,
+          -24041994671,
+          39845280582,
+          30265319771
+        ],
+        "nonZeroEntryChecksumsPerRepeat": [
+          30000,
+          30000,
+          30000,
+          30000,
+          30000
+        ],
+        "checkpointChecksumMatchesExpectedAllRepeats": true,
+        "statusPerRepeat": [
+          "passed",
+          "passed",
+          "passed",
+          "passed",
+          "passed"
+        ]
+      },
+      "rust": {
+        "repeats": 5,
+        "bucketsPerRepeat": [
+          1000,
+          1000,
+          1000,
+          1000,
+          1000
+        ],
+        "expectedInsertsPerRepeat": [
+          10000,
+          10000,
+          10000,
+          10000,
+          10000
+        ],
+        "expectedUpdatesPerRepeat": [
+          10000,
+          10000,
+          10000,
+          10000,
+          10000
+        ],
+        "expectedDeletesPerRepeat": [
+          10000,
+          10000,
+          10000,
+          10000,
+          10000
+        ],
+        "putsPerRepeat": [
+          20000,
+          20000,
+          20000,
+          20000,
+          20000
+        ],
+        "removesPerRepeat": [
+          10000,
+          10000,
+          10000,
+          10000,
+          10000
+        ],
+        "checkpointCountSumPerRepeat": [
+          1030402,
+          1030402,
+          1030402,
+          1030402,
+          1030402
+        ],
+        "expectedCheckpointCountSumPerRepeat": [
+          1030402,
+          1030402,
+          1030402,
+          1030402,
+          1030402
+        ],
+        "checkpointChecksumSumPerRepeat": [
+          2105100410,
+          19598915425,
+          -1142565937,
+          29662660522,
+          40785573837
+        ],
+        "expectedCheckpointChecksumSumPerRepeat": [
+          2105100410,
+          19598915425,
+          -1142565937,
+          29662660522,
+          40785573837
+        ],
+        "nonZeroEntryChecksumsPerRepeat": [
+          30000,
+          30000,
+          30000,
+          30000,
+          30000
+        ],
+        "checkpointChecksumMatchesExpectedAllRepeats": true,
+        "statusPerRepeat": [
+          "passed",
+          "passed",
+          "passed",
+          "passed",
+          "passed"
+        ]
+      },
+      "officialVsRust": {
+        "repeatsCompared": 5,
+        "bucketSetsEqualAllRepeats": true,
+        "expectedInsertsEqualPerBucketAllRepeats": true,
+        "expectedUpdatesEqualPerBucketAllRepeats": true,
+        "expectedDeletesEqualPerBucketAllRepeats": true,
+        "putsEqualPerBucketAllRepeats": true,
+        "removesEqualPerBucketAllRepeats": true,
+        "checkpointCountEqualPerBucketAllRepeats": true,
+        "checkpointChecksumEqualPerBucketAllRepeats": false,
+        "clientOperationDigestEqualPerBucketAllRepeats": true,
+        "clientPutDigestEqualPerBucketAllRepeats": true,
+        "putDigestEqualPerBucketAllRepeats": true,
+        "removeObjectDigestEqualPerBucketAllRepeats": true,
+        "wireDigestEqualPerBucketAllRepeats": false
+      },
+      "checkpointChecksumNote": "Churn checkpoint checksums are self-validated per target. Cross-target equality is not required for REMOVE ops because the checksum hashes the target-local subkey."
+    }
+  },
+  "samples": {
+    "official": [
+      {
+        "repeat": 1,
+        "processingMs": 59577.17,
+        "churnApplySqlMs": 68824.535,
+        "churnReplicationCatchupMs": 6895.521,
+        "churnSlotAckCatchupMs": 6895.521,
+        "churnProtocolProbeMs": 863.518,
+        "churnToProtocolVerifiedMs": 77590.22
+      },
+      {
+        "repeat": 2,
+        "processingMs": 56713.602,
+        "churnApplySqlMs": 65411.488,
+        "churnReplicationCatchupMs": 11709.162,
+        "churnSlotAckCatchupMs": 11709.162,
+        "churnProtocolProbeMs": 720.912,
+        "churnToProtocolVerifiedMs": 78809.857
+      },
+      {
+        "repeat": 3,
+        "processingMs": 57599.271,
+        "churnApplySqlMs": 65786.2,
+        "churnReplicationCatchupMs": 11065.528,
+        "churnSlotAckCatchupMs": 11065.528,
+        "churnProtocolProbeMs": 742.181,
+        "churnToProtocolVerifiedMs": 78585.04
+      },
+      {
+        "repeat": 4,
+        "processingMs": 61477.981,
+        "churnApplySqlMs": 69980.712,
+        "churnReplicationCatchupMs": 6482.345,
+        "churnSlotAckCatchupMs": 6482.345,
+        "churnProtocolProbeMs": 789.13,
+        "churnToProtocolVerifiedMs": 78224.947
+      },
+      {
+        "repeat": 5,
+        "processingMs": 57886.216,
+        "churnApplySqlMs": 66407.483,
+        "churnReplicationCatchupMs": 10422.295,
+        "churnSlotAckCatchupMs": 10422.295,
+        "churnProtocolProbeMs": 739.033,
+        "churnToProtocolVerifiedMs": 78513.717
+      }
+    ],
+    "rust": [
+      {
+        "repeat": 1,
+        "processingMs": 5197.064,
+        "churnApplySqlMs": 68787.191,
+        "churnReplicationCatchupMs": 1810.719,
+        "churnSlotAckCatchupMs": 1810.719,
+        "churnProtocolProbeMs": 330.497,
+        "churnToProtocolVerifiedMs": 71844.724
+      },
+      {
+        "repeat": 2,
+        "processingMs": 5116.744,
+        "churnApplySqlMs": 61726.174,
+        "churnReplicationCatchupMs": 1765.702,
+        "churnSlotAckCatchupMs": 1765.702,
+        "churnProtocolProbeMs": 329.44,
+        "churnToProtocolVerifiedMs": 64775.756
+      },
+      {
+        "repeat": 3,
+        "processingMs": 5046.112,
+        "churnApplySqlMs": 64849.022,
+        "churnReplicationCatchupMs": 1746.348,
+        "churnSlotAckCatchupMs": 1746.348,
+        "churnProtocolProbeMs": 321.177,
+        "churnToProtocolVerifiedMs": 67893.568
+      },
+      {
+        "repeat": 4,
+        "processingMs": 4991.139,
+        "churnApplySqlMs": 73868.672,
+        "churnReplicationCatchupMs": 1700.843,
+        "churnSlotAckCatchupMs": 1700.843,
+        "churnProtocolProbeMs": 313.626,
+        "churnToProtocolVerifiedMs": 76866.821
+      },
+      {
+        "repeat": 5,
+        "processingMs": 5014.502,
+        "churnApplySqlMs": 64220.877,
+        "churnReplicationCatchupMs": 1663.294,
+        "churnSlotAckCatchupMs": 1663.294,
+        "churnProtocolProbeMs": 307.833,
+        "churnToProtocolVerifiedMs": 67135.031
+      }
+    ]
+  }
+}

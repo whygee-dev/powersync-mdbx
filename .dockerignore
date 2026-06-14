@@ -1,0 +1,7 @@
+.git
+target
+tmp
+docs/artifacts
+e2e/official-sdk/node_modules
+**/*.log
+**/data

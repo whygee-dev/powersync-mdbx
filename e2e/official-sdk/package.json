@@ -1,0 +1,27 @@
+{
+  "name": "powersync-mdbx-benchmark-e2e",
+  "version": "0.1.0",
+  "description": "Dataset fixtures for the paired benchmark harness plus optional browser E2E specs against the official PowerSync SDK.",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "postinstall": "powersync-web copy-assets --output public",
+    "dev": "vite",
+    "build": "vite build",
+    "test:e2e": "playwright test",
+    "test:benchmark": "playwright test tests/browser-benchmark.spec.mjs"
+  },
+  "dependencies": {
+    "@journeyapps/wa-sqlite": "^1.5.0",
+    "@powersync/common": "1.51.0",
+    "@powersync/web": "^1.37.1"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.1",
+    "vite": "^7.3.3"
+  }
+}

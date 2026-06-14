@@ -1,0 +1,7 @@
+# CI images are pinned to registry manifest-list digests. Resolve intentional
+# updates with `docker buildx imagetools inspect <image>:<tag>` and review the
+# upstream image release before replacing a digest.
+services:
+  postgres:
+    # postgres:16, resolved 2026-07-11
+    image: postgres@sha256:be01cf82fc7dbba824acf0a82e150b4b360f3ff93c6631d7844af431e841a95c

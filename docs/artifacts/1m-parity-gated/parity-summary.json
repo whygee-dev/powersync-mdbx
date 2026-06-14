@@ -1,0 +1,123 @@
+{
+  "profile": "1m",
+  "sourceTaskRows": 1000402,
+  "targets": [
+    "official",
+    "rust"
+  ],
+  "config": {
+    "projectBucketSampleCount": 1000,
+    "churnRowsPerBucket": 10,
+    "bucketProbeBatchSize": 25,
+    "syncRuleFanout": 0,
+    "processingOnly": true,
+    "officialImage": "journeyapps/powersync-service:1.21.0",
+    "protocolValidator": {
+      "sdk": "@powersync/common",
+      "version": "1.51.0",
+      "publicExports": [
+        "isStreamingKeepalive",
+        "isStreamingSyncCheckpoint",
+        "isStreamingSyncCheckpointComplete",
+        "isStreamingSyncData"
+      ]
+    }
+  },
+  "initial": {
+    "official": {
+      "buckets": 1000,
+      "expectedRows": 1000402,
+      "puts": 1000402,
+      "removes": 0,
+      "checkpointCountSum": 1000402,
+      "checkpointChecksumSum": -45945563582,
+      "checksumNonZero": 1000402,
+      "allStatusPassed": true
+    },
+    "rust": {
+      "buckets": 1000,
+      "expectedRows": 1000402,
+      "puts": 1000402,
+      "removes": 0,
+      "checkpointCountSum": 1000402,
+      "checkpointChecksumSum": -45945563582,
+      "checksumNonZero": 1000402,
+      "allStatusPassed": true
+    },
+    "strictParity": {
+      "countsAndCheckpointEqual": true,
+      "putDigestsEqualPerBucket": true,
+      "semanticDigestsEqualPerBucket": true,
+      "wireDigestsEqualPerBucket": false
+    }
+  },
+  "churn": {
+    "official": {
+      "buckets": 1000,
+      "expectedInserts": 10000,
+      "expectedUpdates": 10000,
+      "expectedDeletes": 10000,
+      "puts": 20000,
+      "removes": 10000,
+      "checkpointCountSum": 1030402,
+      "expectedCheckpointCountSum": 1030402,
+      "checksumNonZero": 30000,
+      "allStatusPassed": true,
+      "allCheckpointSelfValid": true
+    },
+    "rust": {
+      "buckets": 1000,
+      "expectedInserts": 10000,
+      "expectedUpdates": 10000,
+      "expectedDeletes": 10000,
+      "puts": 20000,
+      "removes": 10000,
+      "checkpointCountSum": 1030402,
+      "expectedCheckpointCountSum": 1030402,
+      "checksumNonZero": 30000,
+      "allStatusPassed": true,
+      "allCheckpointSelfValid": true
+    },
+    "mutation": {
+      "projectBucketsTouched": 1000,
+      "rowsPerBucket": 10,
+      "inserts": 10000,
+      "updates": 10000,
+      "deletes": 10000
+    },
+    "strictParity": {
+      "countsEqual": true,
+      "putDigestsEqualPerBucket": true,
+      "removeObjectDigestsEqualPerBucket": true,
+      "checkpointChecksumsEqualPerBucket": false
+    }
+  },
+  "timingsMs": {
+    "processing": {
+      "official": 171054.469,
+      "rust": 11656.562
+    },
+    "churnApplySql": {
+      "official": 117861.086,
+      "rust": 119674.736
+    },
+    "churnCatchup": {
+      "official": 8684.626,
+      "rust": 3273.115
+    },
+    "churnProtocolProbe": {
+      "official": 1039.291,
+      "rust": 567.585
+    },
+    "churnToProtocolVerified": {
+      "official": 128512.361,
+      "rust": 124236.565
+    }
+  },
+  "notes": [
+    "Initial outcome parity is exact for counts, PUT digests, semantic digests, checkpoint counts, and checkpoint checksums.",
+    "Wire digests differ because source-key/subkey encodings are implementation-specific; PUT checksums do not include subkey.",
+    "Churn checkpoint checksums are self-valid per target but not cross-target equal because REMOVE checksum hashes the implementation-specific subkey.",
+    "The 1000-bucket churn run applies 10 inserts, 10 updates, and 10 deletes per project bucket, for 30000 verified incremental ops."
+  ]
+}

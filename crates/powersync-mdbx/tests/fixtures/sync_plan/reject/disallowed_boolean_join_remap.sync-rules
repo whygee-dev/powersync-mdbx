@@ -1,0 +1,6 @@
+edition: 3
+compatibility_version: 1
+storage_version: 1
+streams:
+  tasks_invalid:
+    query: SELECT id AS task_id, project_id FROM public.tasks WHERE project_id = request.parameters() ->> 'project_id' OR org_id = subscription.parameter('org_id')
