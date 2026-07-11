@@ -25,17 +25,92 @@ export function captureContainerResources(container, { run = spawnSync, readFile
   const containerId = parseJsonString(containerIdJson);
   const startedAt = parseJsonString(startedAtJson);
   const pid = Number.parseInt(pidRaw, 10);
-  if (Number.isSafeInteger(pid) && pid > 0) {
+  if (containerId != null && Number.isSafeInteger(pid) && pid > 0) {
     const native = captureNativeLinuxContainerResources(pid, { readFile });
-    if (native != null) {
-      return { status: 'captured', container, containerId, startedAt, source: 'linux-cgroup-v2', ...native };
+    if (native != null && cgroupBelongsToContainer(native.cgroupPath, containerId)) {
+      return {
+        status: 'captured',
+        container,
+        containerId,
+        startedAt,
+        source: 'linux-cgroup-v2',
+        access: 'host-proc',
+        ...native
+      };
     }
+  }
+
+  const containerNative = captureContainerLinuxResources(container, { run });
+  if (containerNative != null) {
+    return {
+      status: 'captured',
+      container,
+      containerId,
+      startedAt,
+      source: 'linux-cgroup-v2',
+      access: 'docker-exec',
+      ...containerNative
+    };
   }
 
   const fallback = captureDockerStats(container, { run });
   return fallback == null
     ? { status: 'unavailable', container, source: 'none' }
     : { status: 'captured', container, containerId, startedAt, source: 'docker-stats-fallback', ...fallback };
+}
+
+export function cgroupBelongsToContainer(cgroupPath, containerId) {
+  if (typeof cgroupPath !== 'string' || typeof containerId !== 'string') return false;
+  const normalizedId = containerId.trim().toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(normalizedId)) return false;
+  return cgroupPath.toLowerCase().includes(normalizedId);
+}
+
+export function captureContainerLinuxResources(container, { run = spawnSync } = {}) {
+  const read = (filePath, optional = false) => {
+    const result = run('docker', ['exec', container, 'cat', filePath], { encoding: 'utf8' });
+    if (result.status !== 0) {
+      if (optional) return null;
+      throw new Error(`cannot read ${filePath} in ${container}`);
+    }
+    return String(result.stdout ?? '');
+  };
+
+  try {
+    const cgroup = parseCgroupPath(read('/proc/1/cgroup'));
+    if (cgroup == null) return null;
+    const cgroupRoot = resolveCgroupRoot(cgroup);
+    if (cgroupRoot == null) return null;
+    const cpu = parseKeyValueCounters(read(path.posix.join(cgroupRoot, 'cpu.stat')));
+    const memoryCurrentBytes = parseInteger(read(path.posix.join(cgroupRoot, 'memory.current')));
+    const memoryPeakRaw = read(path.posix.join(cgroupRoot, 'memory.peak'), true);
+    const memoryPeakBytes = memoryPeakRaw == null ? null : parseInteger(memoryPeakRaw);
+    const io = parseCgroupIoStat(read(path.posix.join(cgroupRoot, 'io.stat')));
+    const process = parseProcStatus(read('/proc/1/status'));
+    const network = parseNetDev(read('/proc/1/net/dev'));
+    if (cpu.usage_usec == null || memoryCurrentBytes == null) return null;
+    return {
+      cpuUsageUsec: cpu.usage_usec,
+      memoryCurrentBytes,
+      memoryPeakBytes,
+      processCurrentRssBytes: process.vmRssBytes,
+      processPeakRssBytes: process.vmHwmBytes,
+      ioReadBytes: io.readBytes,
+      ioWriteBytes: io.writeBytes,
+      networkRxBytes: network.rxBytes,
+      networkTxBytes: network.txBytes,
+      cgroupPath: cgroup
+    };
+  } catch {
+    return null;
+  }
+}
+
+function resolveCgroupRoot(cgroupPath) {
+  if (typeof cgroupPath !== 'string' || !cgroupPath.startsWith('/')) return null;
+  const root = '/sys/fs/cgroup';
+  const resolved = path.posix.resolve(root, cgroupPath.slice(1));
+  return resolved === root || resolved.startsWith(`${root}/`) ? resolved : null;
 }
 
 export function captureNativeLinuxContainerResources(pid, { readFile = fs.readFileSync } = {}) {
@@ -133,6 +208,7 @@ function diffComponent(before, after) {
   return {
     status: countersAvailable ? 'captured' : identityMatches ? after?.status ?? 'unavailable' : 'identity-mismatch',
     source: after?.source ?? null,
+    access: after?.access ?? null,
     cpuSeconds: countersAvailable ? divide(counterDelta(before?.cpuUsageUsec, after?.cpuUsageUsec, beforeIsAbsent), 1_000_000) : null,
     sampledCpuPercent: after?.cpuPercent ?? null,
     currentMemoryBytes: after?.memoryCurrentBytes ?? null,

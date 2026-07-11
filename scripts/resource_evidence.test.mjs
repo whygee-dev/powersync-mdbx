@@ -5,6 +5,8 @@ import path from 'node:path';
 import test from 'node:test';
 
 import {
+  cgroupBelongsToContainer,
+  captureContainerResources,
   diffResourceSnapshots,
   lsnDistanceBytes,
   measurePath,
@@ -15,6 +17,92 @@ import {
   parseNetDev,
   parseProcStatus
 } from './resource_evidence.mjs';
+
+test('host cgroup identity must contain the inspected container id', () => {
+  const id = 'a'.repeat(64);
+  assert.equal(cgroupBelongsToContainer(`/system.slice/docker-${id}.scope`, id), true);
+  assert.equal(cgroupBelongsToContainer('/system.slice/docker-unrelated.scope', id), false);
+  assert.equal(cgroupBelongsToContainer('/', id), false);
+});
+
+test('reads cgroup and proc counters from inside a Linux container when host proc is unavailable', () => {
+  const files = new Map([
+    ['/proc/1/cgroup', '0::/\n'],
+    ['/sys/fs/cgroup/cpu.stat', 'usage_usec 123456\nuser_usec 100000\n'],
+    ['/sys/fs/cgroup/memory.current', '4096\n'],
+    ['/sys/fs/cgroup/memory.peak', '8192\n'],
+    ['/sys/fs/cgroup/io.stat', '8:0 rbytes=10 wbytes=20\n'],
+    ['/proc/1/status', 'VmHWM:\t7 kB\nVmRSS:\t5 kB\n'],
+    ['/proc/1/net/dev', 'eth0: 30 0 0 0 0 0 0 0 40 0\n']
+  ]);
+  const run = (_command, args) => {
+    if (args[0] === 'inspect') {
+      return { status: 0, stdout: '"container-id"\t"2026-01-01T00:00:00Z"\t42\n' };
+    }
+    const value = files.get(args[3]);
+    return value == null ? { status: 1, stdout: '' } : { status: 0, stdout: value };
+  };
+  const captured = captureContainerResources('service', {
+    run,
+    readFile: () => {
+      throw new Error('host proc unavailable');
+    }
+  });
+  assert.deepEqual(captured, {
+    status: 'captured',
+    container: 'service',
+    containerId: 'container-id',
+    startedAt: '2026-01-01T00:00:00Z',
+    source: 'linux-cgroup-v2',
+    access: 'docker-exec',
+    cpuUsageUsec: 123456,
+    memoryCurrentBytes: 4096,
+    memoryPeakBytes: 8192,
+    processCurrentRssBytes: 5120,
+    processPeakRssBytes: 7168,
+    ioReadBytes: 10,
+    ioWriteBytes: 20,
+    networkRxBytes: 30,
+    networkTxBytes: 40,
+    cgroupPath: '/'
+  });
+});
+
+test('docker-exec reads counters below a non-root container cgroup path', () => {
+  const cgroup = '/system.slice/docker-service.scope';
+  const cgroupRoot = `/sys/fs/cgroup${cgroup}`;
+  const files = new Map([
+    ['/proc/1/cgroup', `0::${cgroup}\n`],
+    [`${cgroupRoot}/cpu.stat`, 'usage_usec 321\n'],
+    [`${cgroupRoot}/memory.current`, '1024\n'],
+    [`${cgroupRoot}/memory.peak`, '2048\n'],
+    [`${cgroupRoot}/io.stat`, '8:0 rbytes=11 wbytes=22\n'],
+    ['/proc/1/status', 'VmHWM:\t4 kB\nVmRSS:\t3 kB\n'],
+    ['/proc/1/net/dev', 'eth0: 33 0 0 0 0 0 0 0 44 0\n']
+  ]);
+  const requested = [];
+  const run = (_command, args) => {
+    if (args[0] === 'inspect') {
+      return { status: 0, stdout: '"container-id"\t"2026-01-01T00:00:00Z"\t42\n' };
+    }
+    requested.push(args[3]);
+    const value = files.get(args[3]);
+    return value == null ? { status: 1, stdout: '' } : { status: 0, stdout: value };
+  };
+  const captured = captureContainerResources('service', {
+    run,
+    readFile: () => {
+      throw new Error('host proc unavailable');
+    }
+  });
+  assert.equal(captured.source, 'linux-cgroup-v2');
+  assert.equal(captured.access, 'docker-exec');
+  assert.equal(captured.cgroupPath, cgroup);
+  assert.equal(captured.cpuUsageUsec, 321);
+  assert.equal(captured.memoryPeakBytes, 2048);
+  assert.ok(requested.includes(`${cgroupRoot}/cpu.stat`));
+  assert.ok(!requested.includes('/sys/fs/cgroup/cpu.stat'));
+});
 
 test('parses cgroup v2 counters and sums block devices', () => {
   assert.equal(parseCgroupPath('0::/system.slice/docker-abc.scope\n'), '/system.slice/docker-abc.scope');

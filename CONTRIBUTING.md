@@ -10,6 +10,8 @@ cargo fmt -- --check
 cargo clippy --locked --workspace --all-targets -- -D warnings
 cargo test --locked -q
 node --check scripts/user_value_benchmark.mjs
+node --check scripts/resource_evidence.mjs
+node --check scripts/official_resource_calibration.mjs
 node --check scripts/linux_canary_ladder.mjs
 node --check scripts/export_artifacts.mjs
 node --check scripts/export_canary_ladder.mjs
@@ -21,7 +23,7 @@ cargo audit
 
 CI runs these checks for pull requests and pushes to `main`. It also starts PostgreSQL with logical WAL and runs the ignored live-replication smoke tests.
 
-The Rust toolchain is pinned by `rust-toolchain.toml`. `.nvmrc` constrains Node to major version 20.
+The Rust toolchain is pinned by `rust-toolchain.toml`. `.nvmrc` constrains Node to major version 24.
 
 ## Benchmark changes
 

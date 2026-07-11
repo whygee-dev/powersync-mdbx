@@ -1,18 +1,18 @@
 # powersync-mdbx
 
-An independent Rust/MDBX research implementation of a narrow PowerSync workload: read a consistent PostgreSQL snapshot, materialize bucket state, follow logical replication, and serve the covered data through `/sync/stream`.
+An independent Rust/MDBX implementation of PostgreSQL-to-PowerSync bucket replication. It reads a consistent snapshot, materializes bucket state, follows logical replication, and serves the covered data through `/sync/stream`.
 
 This project is not affiliated with, endorsed by, or supported by PowerSync or Journey Mobile, Inc. It is not a fork of the PowerSync service or a drop-in replacement. The PowerSync name identifies the protocol and service used for comparison.
 
-## Research question
+## Motivation
 
-Initial replication has been an operational bottleneck in a large deployment. This repository tests whether an embedded ordered store and a purpose-built materialization path can reduce the time from service start to protocol-observable readiness.
+Initial replication has been an operational bottleneck in a large deployment. This repository implements and evaluates an embedded ordered store and purpose-built materialization path for reducing the time from service start to protocol-observable readiness.
 
 The comparison changes the language, runtime, storage engine, data layout, and parts of the service architecture. It cannot isolate MongoDB, Node.js, Rust, MDBX, or any other component as the cause of a measured difference. A result here is evidence about this implementation and workload only.
 
 ## Status and scope
 
-This is a reviewable benchmark prototype, not a production service.
+This is a working, correctness-gated implementation of the covered path and a benchmark platform for evaluating it. It is not yet a production service.
 
 The implemented path covers:
 
@@ -31,7 +31,7 @@ It does not claim:
 - `TRUNCATE` support for materialized tables;
 - upload or CRUD APIs;
 - partial-sync priority and full subscription-correlation semantics;
-- production reliability, disaster recovery, or security validation.
+- production reliability, disaster recovery, or an independent production security assessment.
 
 Unsupported layout-changing rule activation and `TRUNCATE` fail closed. The full boundary is documented in [scope](docs/scope.md), [correctness](docs/correctness.md), and [security](SECURITY.md).
 
@@ -47,11 +47,11 @@ Bootstrap state includes the PostgreSQL source, slot, rules, snapshot marker, du
 
 TLS and JWT policy also fail closed: TCP PostgreSQL connections require either `verify-full` or an explicit `disable`, and configured JWT keys require exact audience and issuer policy.
 
-## Current evidence
+## Recorded July 11 scale canary
 
-A bounded four-rung canary passed with both targets running as Linux containers on one Docker Desktop network. Each target received an aggregate limit of 4 CPUs and 8 GiB. Rust received the full limit; the official target split it between the PowerSync service (2.5 CPUs/5 GiB) and MongoDB (1.5 CPUs/3 GiB).
+This canary predates the current official-baseline calibration. Both targets ran as Linux containers on one Docker Desktop network with an aggregate limit of 4 CPUs and 8 GiB each. Rust received the full limit; the official target split it between the PowerSync service (2.5 CPUs/5 GiB) and MongoDB (1.5 CPUs/3 GiB).
 
-The common initial boundary was the first successful `/sync/stream` checkpoint/data/checkpoint-complete proof for the same routed subscription. These are scale canaries, not publication results: each cell is one measured run from an empty target store, every rung ran the official target first and Rust second, and OS and PostgreSQL caches were not flushed. One ordered pair cannot estimate a speedup distribution, tail latency, production reliability, or product-level performance.
+The common initial boundary was the first successful `/sync/stream` checkpoint/data/checkpoint-complete proof for the same routed subscription. Each cell is one measured scale-canary run from an empty target store. Every rung ran the official target first and Rust second; OS and PostgreSQL caches were not flushed.
 
 | Source task rows | Official service | Rust/MDBX |
 | ---: | ---: | ---: |
@@ -60,13 +60,15 @@ The common initial boundary was the first successful `/sync/stream` checkpoint/d
 | 2,000,802 | 148.71 s | 12.26 s |
 | 5,001,002 | 403.16 s | 31.87 s |
 
+Official elapsed time was 8.80x, 9.43x, 12.13x, and 12.65x the Rust/MDBX elapsed time across the four rungs. Those ratios describe these four runs. A repeated, counterbalanced matrix is required to estimate a performance distribution or tail latency.
+
 Both targets passed the selected-bucket equivalence, authorization-isolation, and incremental churn gates at every rung. The verifier sampled 200, 100, 100, and 50 routed buckets respectively. It compared checkpoint count/checksum recurrence and client-visible PUT/REMOVE semantics, not only readiness timings.
 
-The path-scrubbed symmetric canary summary records the exact timings, tested commit, image inputs, resource split, and gate counts. Compressed validation sidecars were retained locally but are not checked in; the complete local run directories, including database state, total about 13 GiB.
+The path-scrubbed symmetric canary summary records the exact timings, tested commit, image inputs, resource split, and gate counts. Compressed validation sidecars were retained locally but are not checked in.
 
 Local release checks passed 227 Rust tests, five live PostgreSQL replication tests, and the Node harness/export/ladder suite, along with formatting, warnings-denied Clippy, dependency audits, the frontend build, Compose validation, and Actionlint.
 
-The host was Docker Desktop on macOS rather than controlled native Linux hardware, the official service/MongoDB resource split has not been reviewed by the PowerSync team, and the local Rust image was identified by image ID rather than a registry digest. The harness revision used for this ladder did not record CPU, memory, I/O, network, storage growth, or WAL volume.
+The host was Docker Desktop on macOS rather than controlled native Linux hardware, that July 11 service/MongoDB split was not reviewed by the PowerSync team, and the local Rust image was identified by image ID rather than a registry digest. The harness revision used for this ladder did not record CPU, memory, I/O, network, storage growth, or WAL volume. The current candidate baseline and resource collector postdate these results, so the recorded ratios do not describe the new configuration.
 
 The other compact artifacts under `docs/artifacts/` are older exploratory runs from an asymmetric topology. They predate material correctness and security changes and are not evidence for the current tree. See the [benchmark methodology](docs/benchmark.md) before quoting any result.
 
@@ -75,7 +77,7 @@ The other compact artifacts under `docs/artifacts/` are older exploratory runs f
 Requirements:
 
 - the Rust toolchain pinned in `rust-toolchain.toml`;
-- Node.js 20;
+- Node.js 24 LTS;
 - Docker with Compose;
 - a C/C++ toolchain, `libclang`, `pg_config`, and PostgreSQL client development libraries.
 
@@ -87,6 +89,8 @@ cargo fmt -- --check
 cargo clippy --locked --workspace --all-targets -- -D warnings
 cargo test --locked -q
 node --check scripts/user_value_benchmark.mjs
+node --check scripts/resource_evidence.mjs
+node --check scripts/official_resource_calibration.mjs
 node --check scripts/linux_canary_ladder.mjs
 node --check scripts/export_artifacts.mjs
 node --check scripts/export_canary_ladder.mjs
@@ -121,10 +125,12 @@ POWERSYNC_USER_VALUE_RUST_IMAGE=powersync-mdbx:benchmark \
 POWERSYNC_USER_VALUE_RUST_IMAGE_PULL=0 \
 POWERSYNC_USER_VALUE_TARGET_CPUS=4 \
 POWERSYNC_USER_VALUE_TARGET_MEMORY=8g \
-POWERSYNC_USER_VALUE_SERVICE_CPUS=2.5 \
-POWERSYNC_USER_VALUE_SERVICE_MEMORY=5g \
-POWERSYNC_USER_VALUE_MONGO_CPUS=1.5 \
-POWERSYNC_USER_VALUE_MONGO_MEMORY=3g \
+POWERSYNC_USER_VALUE_SERVICE_CPUS=1.5 \
+POWERSYNC_USER_VALUE_SERVICE_MEMORY=2g \
+POWERSYNC_USER_VALUE_MONGO_CPUS=2.5 \
+POWERSYNC_USER_VALUE_MONGO_MEMORY=6g \
+POWERSYNC_USER_VALUE_MONGO_CACHE_GB=2 \
+POWERSYNC_USER_VALUE_OFFICIAL_NODE_OPTIONS=--max-old-space-size-percentage=80 \
 POWERSYNC_RUST_ALLOW_COMPARISON=1 \
 POWERSYNC_USER_VALUE_PROFILE=smoke \
 POWERSYNC_USER_VALUE_PROCESSING_ONLY=1 \
@@ -138,13 +144,23 @@ POWERSYNC_USER_VALUE_RETAIN_RAW_RECORDS=1 \
 node scripts/user_value_benchmark.mjs
 ```
 
+This command uses the current candidate official baseline: 1.5 CPU/2 GiB for the service and 2.5 CPU/6 GiB for MongoDB, with a 2 GiB WiredTiger cache. It is not the configuration used by the July 11 table.
+
+Calibrate the official service/MongoDB CPU split at 250k before an expensive matrix:
+
+```sh
+node scripts/official_resource_calibration.mjs
+```
+
+The calibration holds the aggregate 4 CPU/8 GiB budget, service and MongoDB memory limits, WiredTiger cache, dataset, and correctness gates constant. It runs the 1/3, 1.5/2.5, 2/2, and 2.5/1.5 CPU splits twice in opposite orders and retains complete initial resource evidence for every sample.
+
 Run the bounded release ladder from a clean worktree:
 
 ```sh
 node scripts/linux_canary_ladder.mjs
 ```
 
-The ladder builds the Rust image, pins the official service, MongoDB, and PostgreSQL images, stops on the first failure, checks compressed raw records and resource evidence, and writes an append-only manifest under `tmp/linux-canary-ladder/`. It requires a Linux Docker server and up to 150 GiB of free disk before the 5m rung. It is a correctness and scale-safety gate, not a statistical performance matrix. On the release-canary host it took 17 minutes 31 seconds and produced about 13 GiB of artifacts; those figures are planning observations, not runtime guarantees.
+The ladder builds the Rust image, pins the official service, MongoDB, and PostgreSQL images, stops on the first failure, checks compressed raw records and resource evidence, and writes an append-only manifest under `tmp/linux-canary-ladder/`. It requires a Linux Docker server and checks for 150 GiB of free disk before the 5m rung. It is a correctness and scale-safety gate, not a statistical performance matrix. The recorded four-rung canary took 17 minutes 31 seconds and produced about 13 GiB of artifacts.
 
 The current harness records three initial-replication boundaries concurrently:
 
@@ -154,14 +170,15 @@ The current harness records three initial-replication boundaries concurrently:
 
 The first is the common client-visible timing. The second is implementation-specific and must not be presented as a common protocol metric. Official reports an explicit completion flag and LSN; Rust exposes the LSN persisted atomically with its internal snapshot-complete marker, so completion is inferred from that implementation contract. The third records a source slot position, not a consumer acknowledgement or proof that every bucket is materialized.
 
-Each repeat also records per-component CPU, cgroup lifetime peak memory, container init-process lifetime peak RSS, block I/O, network traffic, logical and allocated storage growth, and the cluster-wide inserted WAL-position delta. These high-water marks are lifetime diagnostics, not measurement-window peaks; MongoDB can include provisioning before the baseline. Native Linux uses cgroup v2 and `/proc`; Docker stats is retained only as a diagnostic fallback because it cannot provide cumulative CPU time or peak RSS. Component network counters are not summed because service-to-storage traffic appears in more than one namespace.
+Each repeat also records per-component CPU, cgroup lifetime peak memory, container init-process lifetime peak RSS, block I/O, network traffic, logical and allocated storage growth, and the cluster-wide inserted WAL-position delta. These high-water marks are lifetime diagnostics, not measurement-window peaks; MongoDB can include provisioning before the baseline. The runner reads container cgroup v2 and `/proc` counters directly, using `docker exec` when the Docker host is not local. Docker stats remains an incomplete fallback. Component network counters are not summed because service-to-storage traffic appears in more than one namespace.
 
-Publication runs additionally require a Linux host running the symmetric-container topology, immutable image digests including the Rust image, retained raw records, a clean tree, interleaved target order, warmups, at least 20 measured pairs, native cgroup/proc resource evidence, and explicit review of official-service tuning. `POWERSYNC_USER_VALUE_PUBLIC_RUN=1` enforces those controls. The complete methodology and configuration controls are in [docs/benchmark.md](docs/benchmark.md).
+Publication runs additionally require a Linux host running the symmetric-container topology, immutable image digests including the Rust image, retained raw records, a clean tree, interleaved target order, warmups, at least 20 measured pairs, complete Linux cgroup/proc resource evidence, and explicit review of official-service tuning. `POWERSYNC_USER_VALUE_PUBLIC_RUN=1` enforces those controls. The complete methodology and configuration controls are in [docs/benchmark.md](docs/benchmark.md).
 
 ## Repository layout
 
 - `crates/powersync-mdbx/`: compiler, replication, MDBX storage, protocol, and HTTP service;
 - `scripts/user_value_benchmark.mjs`: paired benchmark and correctness harness;
+- `scripts/official_resource_calibration.mjs`: counterbalanced 250k official-service resource calibration;
 - `scripts/linux_canary_ladder.mjs`: bounded release-candidate ladder;
 - `scripts/resource_evidence.mjs`: Linux cgroup/proc and storage/WAL accounting;
 - `e2e/official-sdk/`: protocol validation using the PowerSync JavaScript packages;

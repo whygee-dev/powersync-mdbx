@@ -4,7 +4,7 @@
 
 The harness measures one generated workload and a constrained set of client-visible fields. It does not measure full PowerSync compatibility, production reliability, operational cost, or the causal effect of any single language or storage engine.
 
-The checked-in `100k-auth-perimeter`, `1m-auth-perimeter`, and `1m-parity-gated` data is historical and exploratory. Those runs predate the current correctness and security changes, do not identify a Git commit, and used different deployment topologies for the official and Rust targets. They are not evidence of current-tree performance. The separate symmetric canary identifies its commit and uses a symmetric container topology, but has one ordered pair per rung and is only a scale-safety result. Do not use either set as a product-level performance claim.
+The checked-in `100k-auth-perimeter`, `1m-auth-perimeter`, and `1m-parity-gated` data is historical and exploratory. Those runs predate the current correctness and security changes, do not identify a Git commit, and used different deployment topologies for the official and Rust targets. They are not evidence of current-tree performance. The separate symmetric canary identifies its commit and uses a symmetric container topology. It supports the four observed official/Rust elapsed-time ratios for that workload and configuration; one ordered pair per rung does not estimate a stable distribution, tail latency, or a causal product-level effect.
 
 ## Historical topology and current timing controls
 
@@ -39,13 +39,13 @@ create a fresh container.
 
 ## Resource evidence
 
-The symmetric runner captures a baseline immediately before measured service start and snapshots after initial readiness, browser work, initial equivalence, churn, and finalization. Each repeat retains phase deltas and the raw snapshots.
+The symmetric runner captures a baseline immediately before measured service start and snapshots after initial readiness, browser work, initial equivalence, churn, and finalization. Each repeat retains phase deltas and the raw snapshots. Block reads and writes are cgroup-accounted I/O; filesystem storage growth is measured separately from the data paths.
 
-On a Linux host running Docker directly, each target component is measured through cgroup v2 and `/proc`: cumulative CPU time, cgroup current and lifetime peak memory, container init-process current and lifetime peak RSS, block reads/writes, and network receive/transmit counters. Storage paths are walked to record both logical bytes and filesystem-allocated bytes. PostgreSQL insert-LSN distance records the cluster-wide inserted WAL-position delta during each phase.
+Each Linux container is measured through cgroup v2 and its PID-1 `/proc` namespace: cumulative CPU time, cgroup current and lifetime peak memory, container init-process current and lifetime peak RSS, block reads/writes, and network receive/transmit counters. On native Linux the runner reads those files through the host; on Docker Desktop it reads the same container-scoped files with `docker exec`. Storage paths are walked to record both logical bytes and filesystem-allocated bytes. PostgreSQL insert-LSN distance records the cluster-wide inserted WAL-position delta during each phase.
 
 The official target is reported as separate service and MongoDB components; Rust is reported as one service component. Network traffic is not summed across official components because service-to-MongoDB traffic is visible in both network namespaces. The memory high-water marks are lifetime diagnostics, not measurement-window stack peaks, and MongoDB can include provisioning before the baseline. WAL position is cluster-wide and is not the number of bytes decoded or stored by either target.
 
-Docker Desktop cannot expose the host `/proc` and cgroup files for its Linux VM. In that environment the harness records Docker stats as diagnostic evidence: instantaneous CPU percentage, current memory, and cumulative block/network counters. It reports cumulative CPU time and peak RSS as unavailable rather than zero. Publication mode rejects this fallback and requires complete native Linux cgroup/proc evidence.
+If container cgroup or `/proc` counters are unavailable, the harness falls back to Docker stats: instantaneous CPU percentage, current memory, and cumulative block/network counters. It reports cumulative CPU time and peak RSS as unavailable rather than zero. Publication mode rejects incomplete fallback evidence.
 
 ## Workload
 
@@ -105,8 +105,10 @@ A defensible comparison should:
 10. include official-service tuning proposed or reviewed by the PowerSync team;
 11. rerun the current tree after every material snapshot, cursor, durability, authentication, or readiness change.
 
-`POWERSYNC_USER_VALUE_PUBLIC_RUN=1` checks the static conditions before starting PostgreSQL or pulling an image, then rejects a run if any required native cgroup/proc resource field is unavailable. It also requires a clean worktree, `symmetric-docker` on a Linux host, an explicit matching target budget and official service/MongoDB split, interleaved targets, at least one warmup pair, the initial and churn protocol gates, `slot-lsn`, `sync-protocol`, raw-record retention, digest-pinned official/MongoDB/PostgreSQL/Rust image references, and an explicit attestation that official tuning was reviewed. A locally built Rust tag can exercise the runner but cannot pass publication preflight.
+`POWERSYNC_USER_VALUE_PUBLIC_RUN=1` checks the static conditions before starting PostgreSQL or pulling an image, then rejects a run if any required Linux cgroup/proc resource field is unavailable. It also requires a clean worktree, `symmetric-docker` on a Linux host, an explicit matching target budget and official service/MongoDB split, interleaved targets, at least one warmup pair, the initial and churn protocol gates, `slot-lsn`, `sync-protocol`, raw-record retention, digest-pinned official/MongoDB/PostgreSQL/Rust image references, and an explicit attestation that official tuning was reviewed. A locally built Rust tag can exercise the runner but cannot pass publication preflight.
 
 ## Command
 
 The native and symmetric canary invocations are in the repository README. Set `POWERSYNC_USER_VALUE_CHURN_GATE_MODE=slot-lsn` for a common PostgreSQL-side churn finish line and `POWERSYNC_USER_VALUE_INITIAL_READINESS=sync-protocol` for the common client-visible initial finish line. Native runs remain exploratory; publication requires the symmetric runner and all preflight controls above.
+
+Run `node scripts/official_resource_calibration.mjs` before freezing a matrix configuration. It compares four official-service/MongoDB CPU splits at 250k, keeps the total budget and storage tuning fixed, reverses candidate order on the second pass, and rejects samples without complete initial CPU, memory, cgroup I/O, network, storage-growth, and WAL-position evidence.

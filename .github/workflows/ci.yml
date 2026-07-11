@@ -50,6 +50,7 @@ jobs:
         run: |
           node --check scripts/user_value_benchmark.mjs
           node --check scripts/resource_evidence.mjs
+          node --check scripts/official_resource_calibration.mjs
           node --check scripts/linux_canary_ladder.mjs
           node --check scripts/export_artifacts.mjs
           node --check scripts/export_canary_ladder.mjs

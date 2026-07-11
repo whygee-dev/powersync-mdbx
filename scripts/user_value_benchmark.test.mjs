@@ -268,7 +268,7 @@ test('publication resource evidence requires native Linux counters for every fie
           }
         }
       }),
-    /not native Linux cgroup v2.*cpuSeconds is unavailable/s
+    /not Linux cgroup v2.*cpuSeconds is unavailable/s
   );
 });
 

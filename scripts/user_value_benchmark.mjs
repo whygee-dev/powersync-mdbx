@@ -216,6 +216,7 @@ const rustReplicationFeedback = {
   }
 };
 const officialMongoCacheGb = process.env.POWERSYNC_USER_VALUE_MONGO_CACHE_GB ?? null;
+const officialNodeOptions = process.env.POWERSYNC_USER_VALUE_OFFICIAL_NODE_OPTIONS ?? null;
 const officialConfigExtraYaml = process.env.POWERSYNC_USER_VALUE_OFFICIAL_CONFIG_EXTRA ?? null;
 const rustLiveUnifiedBench = process.env.POWERSYNC_RUST_LIVE_UNIFIED_BENCH !== '0';
 const rustInitialSnapshotEnabled = process.env.POWERSYNC_RUST_INITIAL_SNAPSHOT ?? '1';
@@ -364,6 +365,7 @@ try {
       },
       rustReplicationFeedback,
       officialMongoCacheGb,
+      officialNodeOptions,
       officialTuningReviewed,
       dockerImageInputs: dockerImageInputs(),
       officialConfigExtraApplied: officialConfigExtraYaml != null,
@@ -2065,6 +2067,7 @@ async function startOfficialService(syncRulesYaml, { port: portOverride } = {}) 
     port == null ? '127.0.0.1::8080' : `127.0.0.1:${port}:8080`,
     '-e',
     `POWERSYNC_CONFIG_B64=${encodedConfig}`,
+    ...(officialNodeOptions ? ['-e', `NODE_OPTIONS=${officialNodeOptions}`] : []),
     officialImage
   ]);
   officialRunning = true;
@@ -5531,7 +5534,7 @@ function assertPublicationResourceEvidence(evidence) {
     for (const [label, component] of components) {
       if (component.status !== 'captured') issues.push(`${windowName}.${label} counters were not captured`);
       if (component.source !== 'linux-cgroup-v2') {
-        issues.push(`${windowName}.${label} counters came from ${component.source ?? 'an unknown source'}, not native Linux cgroup v2`);
+        issues.push(`${windowName}.${label} counters came from ${component.source ?? 'an unknown source'}, not Linux cgroup v2`);
       }
       for (const field of [
         'cpuSeconds',

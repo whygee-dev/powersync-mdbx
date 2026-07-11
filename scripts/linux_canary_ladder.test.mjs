@@ -23,6 +23,12 @@ test('each rung enables the symmetric correctness gates and predictable resource
   assert.equal(env.POWERSYNC_USER_VALUE_WARMUP_PAIRS, '0');
   assert.equal(env.POWERSYNC_USER_VALUE_PROJECT_BUCKET_SAMPLES, '100');
   assert.equal(env.POWERSYNC_RUST_MDBX_MAX_SIZE_BYTES, `${16 * 1024 ** 3}`);
+  assert.equal(env.POWERSYNC_USER_VALUE_SERVICE_CPUS, '1.5');
+  assert.equal(env.POWERSYNC_USER_VALUE_SERVICE_MEMORY, '2g');
+  assert.equal(env.POWERSYNC_USER_VALUE_MONGO_CPUS, '2.5');
+  assert.equal(env.POWERSYNC_USER_VALUE_MONGO_MEMORY, '6g');
+  assert.equal(env.POWERSYNC_USER_VALUE_MONGO_CACHE_GB, '2');
+  assert.equal(env.POWERSYNC_USER_VALUE_OFFICIAL_NODE_OPTIONS, '--max-old-space-size-percentage=80');
   assert.match(env.NODE_OPTIONS, /--trace-warnings --max-old-space-size=8192/);
   assert.equal(
     Number(env.POWERSYNC_USER_VALUE_SERVICE_CPUS) + Number(env.POWERSYNC_USER_VALUE_MONGO_CPUS),
