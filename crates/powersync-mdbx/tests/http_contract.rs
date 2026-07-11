@@ -164,7 +164,7 @@ async fn probe_aliases_return_ok() {
 }
 
 #[tokio::test]
-async fn unified_runtime_readiness_waits_for_source_identity_validation() {
+async fn unified_runtime_readiness_tracks_replication_connection() {
     let state_dir = TempDir::new().expect("state directory");
     let context = powersync_mdbx::control_plane::ServiceContext::new_for_tests(
         state_dir.path().join("sync-rules-state.json"),
@@ -194,6 +194,7 @@ async fn unified_runtime_readiness_waits_for_source_identity_validation() {
 
     readiness.store(true, Ordering::Release);
     let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .uri("/probes/readiness")
@@ -203,6 +204,18 @@ async fn unified_runtime_readiness_waits_for_source_identity_validation() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+
+    readiness.store(false, Ordering::Release);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/probes/readiness")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
 }
 
 #[tokio::test]

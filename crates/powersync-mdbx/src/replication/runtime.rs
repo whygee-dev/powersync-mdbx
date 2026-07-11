@@ -1,4 +1,4 @@
-use std::{env, path::PathBuf, str::FromStr, time::Duration};
+use std::{collections::BTreeSet, env, path::PathBuf, str::FromStr, time::Duration};
 
 use pgwire_replication::{lsn::Lsn, PgWireError, ReplicationClient, ReplicationConfig};
 use tokio::task::JoinHandle;
@@ -186,6 +186,20 @@ impl ReplicationBootstrap {
 
     pub async fn ensure_publication(&self, client: &Client) -> Result<(), ReplicationRuntimeError> {
         ensure_publication(client, &self.replication_plane.publication).await
+    }
+
+    pub async fn ensure_publication_covers(
+        &self,
+        client: &Client,
+        required_source_tables: &[&str],
+    ) -> Result<(), ReplicationRuntimeError> {
+        self.ensure_publication(client).await?;
+        validate_publication_coverage(
+            client,
+            &self.replication_plane.publication,
+            required_source_tables,
+        )
+        .await
     }
 
     pub async fn ensure_slot(&self, client: &Client) -> Result<(), ReplicationRuntimeError> {
@@ -416,6 +430,12 @@ pub enum ReplicationRuntimeError {
     },
     #[error("unsafe replication slot continuity: {0}")]
     SlotContinuity(String),
+    #[error("unsafe PostgreSQL publication coverage: {0}")]
+    PublicationCoverage(String),
+    #[error(
+        "PostgreSQL 13 or newer is required for publication validation; server_version_num={0}"
+    )]
+    UnsupportedPostgresVersion(i32),
 }
 
 pub fn slot_progress_query() -> &'static str {
@@ -428,6 +448,61 @@ pub fn current_wal_lsn_query() -> &'static str {
 
 pub fn publication_exists_query() -> &'static str {
     "SELECT 1 FROM pg_publication WHERE pubname = $1"
+}
+
+pub fn postgres_server_version_query() -> &'static str {
+    "SELECT current_setting('server_version_num')::integer"
+}
+
+pub fn publication_coverage_query(
+    server_version_num: i32,
+) -> Result<&'static str, ReplicationRuntimeError> {
+    if server_version_num < 130_000 {
+        return Err(ReplicationRuntimeError::UnsupportedPostgresVersion(
+            server_version_num,
+        ));
+    }
+    Ok(
+        "SELECT p.puballtables, p.pubinsert, p.pubupdate, p.pubdelete, p.pubtruncate, \
+                p.pubviaroot, pt.schemaname, pt.tablename \
+         FROM pg_publication AS p \
+         LEFT JOIN pg_publication_tables AS pt \
+           ON NOT p.puballtables AND pt.pubname = p.pubname \
+         WHERE p.pubname = $1",
+    )
+}
+
+pub fn publication_table_semantics_query(
+    server_version_num: i32,
+) -> Result<&'static str, ReplicationRuntimeError> {
+    if server_version_num < 130_000 {
+        return Err(ReplicationRuntimeError::UnsupportedPostgresVersion(
+            server_version_num,
+        ));
+    }
+    if server_version_num < 150_000 {
+        return Ok("SELECT EXISTS (SELECT 1 FROM pg_attribute AS a \
+                            WHERE a.attrelid = c.oid AND a.attnum > 0 \
+                              AND NOT a.attisdropped AND a.attgenerated <> ''), \
+                    FALSE, \
+                    c.relkind = 'p' OR EXISTS (SELECT 1 FROM pg_inherits AS i WHERE i.inhparent = c.oid) \
+             FROM pg_publication AS p \
+             JOIN pg_namespace AS ns ON ns.nspname = $2 \
+             JOIN pg_class AS c ON c.relnamespace = ns.oid AND c.relname = $3 \
+             WHERE p.pubname = $1");
+    }
+    Ok("SELECT EXISTS (SELECT 1 FROM pg_attribute AS a \
+                        WHERE a.attrelid = c.oid AND a.attnum > 0 \
+                          AND NOT a.attisdropped \
+                          AND NOT (a.attname = ANY(pt.attnames))), \
+                pt.rowfilter IS NOT NULL, \
+                c.relkind = 'p' OR EXISTS (SELECT 1 FROM pg_inherits AS i WHERE i.inhparent = c.oid) \
+         FROM pg_publication AS p \
+         JOIN pg_namespace AS ns ON ns.nspname = $2 \
+         JOIN pg_class AS c ON c.relnamespace = ns.oid AND c.relname = $3 \
+         LEFT JOIN pg_publication_tables AS pt \
+           ON pt.pubname = p.pubname AND pt.schemaname = $2 AND pt.tablename = $3 \
+         WHERE p.pubname = $1")
 }
 
 pub fn create_publication_query(publication_name: &str) -> Result<String, ReplicationRuntimeError> {
@@ -477,6 +552,196 @@ async fn ensure_publication(
     Ok(())
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PublicationCoverage {
+    all_tables: bool,
+    publishes_insert: bool,
+    publishes_update: bool,
+    publishes_delete: bool,
+    publishes_truncate: bool,
+    publishes_via_partition_root: bool,
+    tables: BTreeSet<(String, String)>,
+    tables_with_omitted_columns: BTreeSet<(String, String)>,
+    tables_with_row_filters: BTreeSet<(String, String)>,
+    parent_tables: BTreeSet<(String, String)>,
+}
+
+async fn validate_publication_coverage(
+    client: &Client,
+    publication_name: &str,
+    required_source_tables: &[&str],
+) -> Result<(), ReplicationRuntimeError> {
+    let server_version_num: i32 = client
+        .query_one(postgres_server_version_query(), &[])
+        .await
+        .map_err(ReplicationRuntimeError::ControlPlaneQuery)?
+        .get(0);
+    let coverage_query = publication_coverage_query(server_version_num)?;
+    let rows = client
+        .query(coverage_query, &[&publication_name])
+        .await
+        .map_err(ReplicationRuntimeError::ControlPlaneQuery)?;
+    let Some(first) = rows.first() else {
+        return Err(ReplicationRuntimeError::PublicationCoverage(format!(
+            "publication {publication_name:?} does not exist after bootstrap"
+        )));
+    };
+
+    let mut coverage = PublicationCoverage {
+        all_tables: first.get(0),
+        publishes_insert: first.get(1),
+        publishes_update: first.get(2),
+        publishes_delete: first.get(3),
+        publishes_truncate: first.get(4),
+        publishes_via_partition_root: first.get(5),
+        tables: BTreeSet::new(),
+        tables_with_omitted_columns: BTreeSet::new(),
+        tables_with_row_filters: BTreeSet::new(),
+        parent_tables: BTreeSet::new(),
+    };
+    for row in rows {
+        let schema = row.get::<_, Option<String>>(6);
+        let table = row.get::<_, Option<String>>(7);
+        if let (Some(schema), Some(table)) = (schema, table) {
+            coverage.tables.insert((schema, table));
+        }
+    }
+
+    let semantics_query = publication_table_semantics_query(server_version_num)?;
+    for source_table in required_source_tables {
+        let (schema, table) = split_source_table(source_table);
+        let table_identity = (schema.to_owned(), table.to_owned());
+        if !coverage.all_tables && !coverage.tables.contains(&table_identity) {
+            continue;
+        }
+        let semantics = client
+            .query_opt(semantics_query, &[&publication_name, &schema, &table])
+            .await
+            .map_err(ReplicationRuntimeError::ControlPlaneQuery)?;
+        let Some(semantics) = semantics else {
+            continue;
+        };
+        if semantics.get::<_, bool>(0) {
+            coverage
+                .tables_with_omitted_columns
+                .insert(table_identity.clone());
+        }
+        if semantics.get::<_, bool>(1) {
+            coverage
+                .tables_with_row_filters
+                .insert(table_identity.clone());
+        }
+        if semantics.get::<_, bool>(2) {
+            coverage.parent_tables.insert(table_identity);
+        }
+    }
+
+    validate_publication_description(publication_name, required_source_tables, &coverage)
+}
+
+fn validate_publication_description(
+    publication_name: &str,
+    required_source_tables: &[&str],
+    coverage: &PublicationCoverage,
+) -> Result<(), ReplicationRuntimeError> {
+    let mut missing_operations = Vec::new();
+    if !coverage.publishes_insert {
+        missing_operations.push("insert");
+    }
+    if !coverage.publishes_update {
+        missing_operations.push("update");
+    }
+    if !coverage.publishes_delete {
+        missing_operations.push("delete");
+    }
+    // TRUNCATE is unsupported, but it must reach the decoder so the service
+    // fails closed instead of silently retaining rows removed at the source.
+    if !coverage.publishes_truncate {
+        missing_operations.push("truncate");
+    }
+
+    let required_tables = required_source_tables
+        .iter()
+        .map(|source_table| {
+            let (schema, table) = split_source_table(source_table);
+            (schema.to_owned(), table.to_owned())
+        })
+        .collect::<BTreeSet<_>>();
+    let missing_tables = if coverage.all_tables {
+        Vec::new()
+    } else {
+        required_tables
+            .difference(&coverage.tables)
+            .map(|(schema, table)| format!("{schema}.{table}"))
+            .collect::<Vec<_>>()
+    };
+    let restricted_required_tables = |tables: &BTreeSet<(String, String)>| {
+        required_tables
+            .intersection(tables)
+            .map(|(schema, table)| format!("{schema}.{table}"))
+            .collect::<Vec<_>>()
+    };
+    let tables_with_omitted_columns =
+        restricted_required_tables(&coverage.tables_with_omitted_columns);
+    let tables_with_row_filters = restricted_required_tables(&coverage.tables_with_row_filters);
+    let parent_tables = restricted_required_tables(&coverage.parent_tables);
+
+    if missing_operations.is_empty()
+        && missing_tables.is_empty()
+        && tables_with_omitted_columns.is_empty()
+        && tables_with_row_filters.is_empty()
+        && parent_tables.is_empty()
+        && !coverage.publishes_via_partition_root
+    {
+        return Ok(());
+    }
+
+    let mut problems = Vec::new();
+    if !missing_operations.is_empty() {
+        problems.push(format!(
+            "does not publish required operations: {}",
+            missing_operations.join(", ")
+        ));
+    }
+    if !missing_tables.is_empty() {
+        problems.push(format!(
+            "is missing required source tables: {}",
+            missing_tables.join(", ")
+        ));
+    }
+    if !tables_with_omitted_columns.is_empty() {
+        problems.push(format!(
+            "omits columns from required source tables: {}",
+            tables_with_omitted_columns.join(", ")
+        ));
+    }
+    if !tables_with_row_filters.is_empty() {
+        problems.push(format!(
+            "uses row filters for required source tables: {}",
+            tables_with_row_filters.join(", ")
+        ));
+    }
+    if !parent_tables.is_empty() {
+        problems.push(format!(
+            "uses partition or inheritance parents as required source tables: {}",
+            parent_tables.join(", ")
+        ));
+    }
+    if coverage.publishes_via_partition_root {
+        problems.push("enables publish_via_partition_root".to_owned());
+    }
+    Err(ReplicationRuntimeError::PublicationCoverage(format!(
+        "publication {publication_name:?} {}",
+        problems.join("; ")
+    )))
+}
+
+fn split_source_table(source_table: &str) -> (&str, &str) {
+    source_table
+        .split_once('.')
+        .unwrap_or(("public", source_table))
+}
+
 async fn ensure_slot(client: &Client, slot_name: &str) -> Result<(), ReplicationRuntimeError> {
     let slot_state = client
         .query_opt(slot_state_query(), &[&slot_name])
@@ -508,15 +773,18 @@ async fn ensure_slot(client: &Client, slot_name: &str) -> Result<(), Replication
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::time::Duration;
 
     use pgwire_replication::ReplicationConfig;
 
     use super::{
         configure_replication_feedback_from_lookup, create_logical_replication_slot_query,
-        create_publication_query, current_wal_lsn_query, publication_exists_query,
-        quote_identifier, slot_progress_query, slot_state_query, ReplicationBootstrap,
-        ReplicationBootstrapError, REPLICATION_IDLE_WAKEUP_INTERVAL_MS_ENV,
+        create_publication_query, current_wal_lsn_query, postgres_server_version_query,
+        publication_coverage_query, publication_exists_query, publication_table_semantics_query,
+        quote_identifier, slot_progress_query, slot_state_query, validate_publication_description,
+        PublicationCoverage, ReplicationBootstrap, ReplicationBootstrapError,
+        ReplicationRuntimeError, REPLICATION_IDLE_WAKEUP_INTERVAL_MS_ENV,
         REPLICATION_STATUS_INTERVAL_MS_ENV,
     };
     use crate::replication::{postgres::PostgresLsn, PostgresReplicationConfig};
@@ -690,6 +958,188 @@ mod tests {
     }
 
     #[test]
+    fn publication_coverage_query_avoids_expanding_all_tables_publications() {
+        let query = publication_coverage_query(150_000).expect("PostgreSQL 15 query");
+        assert!(query.contains("ON NOT p.puballtables"));
+        assert!(query.contains("pt.schemaname, pt.tablename"));
+        assert!(query.contains("p.pubviaroot"));
+    }
+
+    #[test]
+    fn publication_coverage_query_supports_pre_filter_postgres_versions() {
+        assert_eq!(
+            postgres_server_version_query(),
+            "SELECT current_setting('server_version_num')::integer"
+        );
+        assert!(matches!(
+            publication_coverage_query(120_000),
+            Err(ReplicationRuntimeError::UnsupportedPostgresVersion(120_000))
+        ));
+    }
+
+    #[test]
+    fn publication_table_semantics_queries_are_version_compatible() {
+        let postgres_14 = publication_table_semantics_query(140_000).expect("PostgreSQL 14");
+        assert!(postgres_14.contains("a.attgenerated <> ''"));
+        assert!(postgres_14.contains("FALSE"));
+        assert!(!postgres_14.contains("pt.attnames"));
+
+        let postgres_15 = publication_table_semantics_query(150_000).expect("PostgreSQL 15");
+        assert!(postgres_15.contains("a.attname = ANY(pt.attnames)"));
+        assert!(postgres_15.contains("pt.rowfilter IS NOT NULL"));
+        assert!(postgres_15.contains("i.inhparent = c.oid"));
+
+        let postgres_18 = publication_table_semantics_query(180_000).expect("PostgreSQL 18");
+        assert_eq!(postgres_18, postgres_15);
+    }
+
+    #[test]
+    fn publication_coverage_accepts_all_tables_with_required_operations() {
+        validate_publication_description(
+            "pub_rust",
+            &["tasks", "private.memberships"],
+            &publication_coverage(true, true, true, true, true, &[]),
+        )
+        .expect("all-tables publication should cover every source table");
+    }
+
+    #[test]
+    fn publication_coverage_accepts_explicit_required_tables() {
+        validate_publication_description(
+            "pub_rust",
+            &["tasks", "private.memberships"],
+            &publication_coverage(
+                false,
+                true,
+                true,
+                true,
+                true,
+                &[
+                    ("public", "tasks"),
+                    ("private", "memberships"),
+                    ("public", "extra"),
+                ],
+            ),
+        )
+        .expect("explicit publication should cover all required source tables");
+    }
+
+    #[test]
+    fn publication_coverage_rejects_missing_source_tables_deterministically() {
+        let error = validate_publication_description(
+            "pub_rust",
+            &["tasks", "private.memberships", "public.comments"],
+            &publication_coverage(false, true, true, true, true, &[("public", "tasks")]),
+        )
+        .expect_err("partial publication must fail closed");
+
+        assert!(matches!(
+            error,
+            ReplicationRuntimeError::PublicationCoverage(_)
+        ));
+        assert_eq!(
+            error.to_string(),
+            "unsafe PostgreSQL publication coverage: publication \"pub_rust\" is missing required source tables: private.memberships, public.comments"
+        );
+    }
+
+    #[test]
+    fn publication_coverage_rejects_disabled_change_operations() {
+        let error = validate_publication_description(
+            "pub_rust",
+            &["tasks"],
+            &publication_coverage(true, true, false, false, false, &[]),
+        )
+        .expect_err("publication without update/delete must fail closed");
+
+        assert_eq!(
+            error.to_string(),
+            "unsafe PostgreSQL publication coverage: publication \"pub_rust\" does not publish required operations: update, delete, truncate"
+        );
+    }
+
+    #[test]
+    fn publication_coverage_rejects_omitted_columns_filters_and_partition_root_mapping() {
+        let mut coverage = publication_coverage(
+            false,
+            true,
+            true,
+            true,
+            true,
+            &[("public", "tasks"), ("private", "memberships")],
+        );
+        coverage
+            .tables_with_omitted_columns
+            .insert(("public".to_owned(), "tasks".to_owned()));
+        coverage
+            .tables_with_row_filters
+            .insert(("private".to_owned(), "memberships".to_owned()));
+        coverage.publishes_via_partition_root = true;
+
+        let error = validate_publication_description(
+            "pub_rust",
+            &["tasks", "private.memberships"],
+            &coverage,
+        )
+        .expect_err("publication transformations must fail closed");
+
+        assert_eq!(
+            error.to_string(),
+            "unsafe PostgreSQL publication coverage: publication \"pub_rust\" omits columns from required source tables: public.tasks; uses row filters for required source tables: private.memberships; enables publish_via_partition_root"
+        );
+    }
+
+    #[test]
+    fn publication_coverage_ignores_restrictions_on_unreferenced_tables() {
+        let mut coverage = publication_coverage(
+            false,
+            true,
+            true,
+            true,
+            true,
+            &[("public", "tasks"), ("public", "audit_log")],
+        );
+        coverage
+            .tables_with_row_filters
+            .insert(("public".to_owned(), "audit_log".to_owned()));
+
+        validate_publication_description("pub_rust", &["tasks"], &coverage)
+            .expect("unreferenced publication entries do not affect the active plan");
+    }
+
+    #[test]
+    fn publication_coverage_rejects_omitted_generated_columns() {
+        let mut coverage =
+            publication_coverage(false, true, true, true, true, &[("public", "tasks")]);
+        coverage
+            .tables_with_omitted_columns
+            .insert(("public".to_owned(), "tasks".to_owned()));
+
+        let error = validate_publication_description("pub_rust", &["tasks"], &coverage)
+            .expect_err("unpublished generated columns must fail closed");
+        assert_eq!(
+            error.to_string(),
+            "unsafe PostgreSQL publication coverage: publication \"pub_rust\" omits columns from required source tables: public.tasks"
+        );
+    }
+
+    #[test]
+    fn publication_coverage_rejects_partition_and_inheritance_parents() {
+        let mut coverage =
+            publication_coverage(false, true, true, true, true, &[("public", "tasks")]);
+        coverage
+            .parent_tables
+            .insert(("public".to_owned(), "tasks".to_owned()));
+
+        let error = validate_publication_description("pub_rust", &["tasks"], &coverage)
+            .expect_err("parent-table relation identities must fail closed");
+        assert_eq!(
+            error.to_string(),
+            "unsafe PostgreSQL publication coverage: publication \"pub_rust\" uses partition or inheritance parents as required source tables: public.tasks"
+        );
+    }
+
+    #[test]
     fn create_publication_query_quotes_identifier() {
         assert_eq!(
             create_publication_query("pub\"rust").expect("valid identifier"),
@@ -750,5 +1200,30 @@ mod tests {
             "slot_rust",
             "pub_rust",
         )
+    }
+
+    fn publication_coverage(
+        all_tables: bool,
+        publishes_insert: bool,
+        publishes_update: bool,
+        publishes_delete: bool,
+        publishes_truncate: bool,
+        tables: &[(&str, &str)],
+    ) -> PublicationCoverage {
+        PublicationCoverage {
+            all_tables,
+            publishes_insert,
+            publishes_update,
+            publishes_delete,
+            publishes_truncate,
+            publishes_via_partition_root: false,
+            tables: tables
+                .iter()
+                .map(|(schema, table)| ((*schema).to_owned(), (*table).to_owned()))
+                .collect(),
+            tables_with_omitted_columns: BTreeSet::new(),
+            tables_with_row_filters: BTreeSet::new(),
+            parent_tables: BTreeSet::new(),
+        }
     }
 }

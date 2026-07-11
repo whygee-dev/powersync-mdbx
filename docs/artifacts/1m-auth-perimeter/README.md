@@ -6,9 +6,9 @@ before using any value from this directory.
 
 The official service and MongoDB ran in Docker Desktop's resource-limited
 Linux VM; Rust and MDBX ran natively on the host. The run predates the
-current correctness and security implementation and does not identify its Git
-commit. It is retained for inspection, not as current-tree or product-level
-performance evidence.
+current correctness and security changes and does not identify its Git
+commit. It is retained for inspection, not as current-tree performance
+evidence.
 
 Run shape:
 
@@ -29,7 +29,8 @@ the common start boundary.
 
 [`parity-summary.json`](parity-summary.json) contains aggregate parity,
 timing, host, and sample data. Raw per-bucket observations and `results.json`
-were not retained, so the summary is not independently reproducible.
+were not retained, so the summary cannot be audited against raw observations or
+regenerated from the retained files.
 
 Initial counts, PUT and semantic digests, checkpoint counts, and checkpoint
 checksums matched for every probed bucket. Churn PUT and REMOVE object digests

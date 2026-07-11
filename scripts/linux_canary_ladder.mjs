@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -23,16 +24,23 @@ const pinnedImages = Object.freeze({
     'postgres@sha256:be01cf82fc7dbba824acf0a82e150b4b360f3ff93c6631d7844af431e841a95c'
 });
 
-export function canaryEnvironment(rung, artifactRoot, base = process.env) {
+export function canaryEnvironment(
+  rung,
+  artifactRoot,
+  base = process.env,
+  invocationId,
+  rustRuntimeImage = base.POWERSYNC_USER_VALUE_RUST_IMAGE ?? 'powersync-mdbx:benchmark'
+) {
+  if (!invocationId) throw new Error('ladder invocation id is required');
   return {
     ...base,
     ...pinnedImages,
     NODE_OPTIONS: appendNodeOption(base.NODE_OPTIONS, '--max-old-space-size=8192'),
-    POWERSYNC_BENCHMARK_COMPOSE_PROJECT: `powersync_mdbx_ladder_${rung.profile}`,
+    POWERSYNC_BENCHMARK_COMPOSE_PROJECT: ladderComposeProject(invocationId, rung.profile),
     POWERSYNC_BENCHMARK_SKIP_TOOLING_INSTALL: '1',
     POWERSYNC_USER_VALUE_ARTIFACT_ROOT: artifactRoot,
     POWERSYNC_USER_VALUE_RUNTIME: 'symmetric-docker',
-    POWERSYNC_USER_VALUE_RUST_IMAGE: base.POWERSYNC_USER_VALUE_RUST_IMAGE ?? 'powersync-mdbx:benchmark',
+    POWERSYNC_USER_VALUE_RUST_IMAGE: rustRuntimeImage,
     POWERSYNC_USER_VALUE_RUST_IMAGE_PULL: '0',
     POWERSYNC_USER_VALUE_TARGET_CPUS: base.POWERSYNC_USER_VALUE_TARGET_CPUS ?? '4',
     POWERSYNC_USER_VALUE_TARGET_MEMORY: base.POWERSYNC_USER_VALUE_TARGET_MEMORY ?? '8g',
@@ -43,6 +51,19 @@ export function canaryEnvironment(rung, artifactRoot, base = process.env) {
     POWERSYNC_USER_VALUE_MONGO_CACHE_GB: base.POWERSYNC_USER_VALUE_MONGO_CACHE_GB ?? '2',
     POWERSYNC_USER_VALUE_OFFICIAL_NODE_OPTIONS:
       base.POWERSYNC_USER_VALUE_OFFICIAL_NODE_OPTIONS ?? '--max-old-space-size-percentage=80',
+    POWERSYNC_USER_VALUE_STORAGE_CLASS_ATTESTED: '1',
+    POWERSYNC_USER_VALUE_DURABILITY_POLICY_ATTESTED: '1',
+    POWERSYNC_USER_VALUE_OFFICIAL_STORAGE_CLASS:
+      base.POWERSYNC_USER_VALUE_OFFICIAL_STORAGE_CLASS ??
+      'Docker bind mount on the host filesystem; MongoDB data below the shared artifact root',
+    POWERSYNC_USER_VALUE_RUST_STORAGE_CLASS:
+      base.POWERSYNC_USER_VALUE_RUST_STORAGE_CLASS ??
+      'Docker bind mount on the host filesystem; MDBX data below the shared artifact root',
+    POWERSYNC_USER_VALUE_OFFICIAL_DURABILITY_POLICY:
+      base.POWERSYNC_USER_VALUE_OFFICIAL_DURABILITY_POLICY ??
+      'PowerSync default MongoDB writes; MongoDB WiredTiger journaling enabled',
+    POWERSYNC_USER_VALUE_RUST_DURABILITY_POLICY:
+      base.POWERSYNC_USER_VALUE_RUST_DURABILITY_POLICY ?? 'libmdbx SyncMode::Durable',
     POWERSYNC_RUST_ALLOW_COMPARISON: '1',
     POWERSYNC_RUST_MAX_SYNC_READ_ENTRIES: '150000',
     POWERSYNC_RUST_MAX_SYNC_READ_BYTES: '134217728',
@@ -67,16 +88,36 @@ export function canaryEnvironment(rung, artifactRoot, base = process.env) {
   };
 }
 
-function main() {
+export function ladderComposeProject(invocationId, profile) {
+  const normalize = (value) => String(value).toLowerCase().replaceAll(/[^a-z0-9_-]+/g, '-').replaceAll(/^-+|-+$/g, '');
+  const invocation = normalize(invocationId).slice(0, 16);
+  const rung = normalize(profile).slice(0, 16);
+  if (!invocation || !rung) throw new Error('ladder Compose identity is empty after normalization');
+  return `powersync_mdbx_ladder_${invocation}_${rung}`;
+}
+
+export function ladderRustBuildImage(invocationId) {
+  if (!/^[0-9a-f]{12}$/.test(invocationId)) {
+    throw new Error(`invalid ladder invocation id ${JSON.stringify(invocationId)}`);
+  }
+  return `powersync-mdbx:ladder-${invocationId}`;
+}
+
+async function main() {
   assertCleanWorktree();
   assertLinuxDockerServer();
   run('npm', ['--prefix', 'e2e/official-sdk', 'ci']);
 
-  const rustImage = process.env.POWERSYNC_USER_VALUE_RUST_IMAGE ?? 'powersync-mdbx:benchmark';
+  const invocationId = randomBytes(6).toString('hex');
+  const rustImageInput = process.env.POWERSYNC_USER_VALUE_RUST_IMAGE ?? 'powersync-mdbx:benchmark';
+  const rustBuildImage =
+    process.env.POWERSYNC_LADDER_SKIP_BUILD === '1'
+      ? rustImageInput
+      : ladderRustBuildImage(invocationId);
   if (process.env.POWERSYNC_LADDER_SKIP_BUILD !== '1') {
-    run('docker', ['build', '-f', 'Dockerfile.benchmark', '-t', rustImage, '.']);
+    run('docker', ['build', '-f', 'Dockerfile.benchmark', '-t', rustBuildImage, '.']);
   }
-  const rustImageId = capture('docker', ['image', 'inspect', '--format', '{{.Id}}', rustImage]);
+  const rustImageId = capture('docker', ['image', 'inspect', '--format', '{{.Id}}', rustBuildImage]);
 
   const suffix = new Date().toISOString().replaceAll(/[:.]/g, '-');
   const ladderRoot = path.resolve(process.env.POWERSYNC_LADDER_ARTIFACT_ROOT ?? path.join(defaultRoot, suffix));
@@ -86,8 +127,11 @@ function main() {
   const manifest = {
     schemaVersion: 1,
     startedAt: new Date().toISOString(),
+    invocationId,
     gitCommit: capture('git', ['rev-parse', 'HEAD']),
-    rustImage,
+    rustImageInput,
+    rustBuildImage,
+    rustRuntimeImage: rustImageId,
     rustImageId,
     dockerServer: capture('docker', [
       'info',
@@ -100,16 +144,14 @@ function main() {
   writeManifest(manifestPath, manifest);
 
   try {
+    installSignalForwarding();
     for (const rung of LADDER_PROFILES) {
+      throwIfTerminating();
       assertFreeDisk(ladderRoot, rung.minFreeGiB, rung.profile);
       const artifactRoot = path.join(ladderRoot, rung.profile);
       fs.mkdirSync(artifactRoot);
       const startedAt = new Date().toISOString();
-      const result = spawnSync(process.execPath, ['scripts/user_value_benchmark.mjs'], {
-        cwd: repoRoot,
-        env: canaryEnvironment(rung, artifactRoot),
-        stdio: 'inherit'
-      });
+      const result = await runBenchmark(rung, artifactRoot, invocationId, rustImageId);
       const runDir = singleRunDirectory(artifactRoot);
       const entry = {
         ...rung,
@@ -126,16 +168,18 @@ function main() {
       if (result.status !== 0) {
         throw new Error(`${rung.profile} canary failed with exit code ${result.status}${result.signal ? ` (${result.signal})` : ''}`);
       }
-      assertRunArtifacts(runDir, rung.profile);
+      assertRunArtifacts(runDir, rung.profile, rustImageId);
       entry.status = 'passed';
       writeManifest(manifestPath, manifest);
     }
+    throwIfTerminating();
     manifest.status = 'passed';
   } catch (error) {
-    manifest.status = 'failed';
+    manifest.status = terminationSignal == null ? 'failed' : 'interrupted';
     manifest.error = error instanceof Error ? error.message : String(error);
     throw error;
   } finally {
+    removeSignalForwarding();
     manifest.finishedAt = new Date().toISOString();
     writeManifest(manifestPath, manifest);
     process.stderr.write(`[linux-canary-ladder] manifest: ${manifestPath}\n`);
@@ -160,7 +204,7 @@ function assertFreeDisk(directory, minimumGiB, profile) {
   }
 }
 
-function assertRunArtifacts(runDir, profile) {
+function assertRunArtifacts(runDir, profile, rustImageId) {
   if (runDir == null) throw new Error(`${profile} canary did not create a run directory`);
   const resultsPath = path.join(runDir, 'results.json');
   const comparisonPath = path.join(runDir, 'compare.json');
@@ -169,6 +213,12 @@ function assertRunArtifacts(runDir, profile) {
   }
   const results = JSON.parse(fs.readFileSync(resultsPath, 'utf8'));
   if (results.profile !== profile) throw new Error(`${profile} artifact reports profile ${results.profile}`);
+  const recordedRustImage = results.provenance?.dockerImages?.[rustImageId];
+  if (recordedRustImage?.id !== rustImageId) {
+    throw new Error(
+      `${profile} artifact resolved Rust image ${recordedRustImage?.id ?? 'unknown'}, expected ${rustImageId}`
+    );
+  }
   for (const target of ['official', 'rust']) {
     const runs = results.targets?.[target]?.endUser?.runs;
     if (!Array.isArray(runs) || runs.length !== 1) throw new Error(`${profile}/${target} must contain exactly one run`);
@@ -213,9 +263,63 @@ function appendNodeOption(existing, option) {
 }
 
 function writeManifest(manifestPath, manifest) {
-  const temporaryPath = `${manifestPath}.tmp`;
-  fs.writeFileSync(temporaryPath, `${JSON.stringify(manifest, null, 2)}\n`);
-  fs.renameSync(temporaryPath, manifestPath);
+  const temporaryPath = `${manifestPath}.tmp-${process.pid}`;
+  try {
+    fs.writeFileSync(temporaryPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    fs.renameSync(temporaryPath, manifestPath);
+  } finally {
+    fs.rmSync(temporaryPath, { force: true });
+  }
+}
+
+let activeChild = null;
+let terminationSignal = null;
+const signalHandlers = new Map();
+
+function installSignalForwarding() {
+  for (const signal of ['SIGINT', 'SIGTERM']) {
+    const handler = () => {
+      terminationSignal ??= signal;
+      if (activeChild != null && activeChild.exitCode == null && activeChild.signalCode == null) {
+        activeChild.kill(signal);
+      }
+    };
+    signalHandlers.set(signal, handler);
+    process.on(signal, handler);
+  }
+}
+
+function removeSignalForwarding() {
+  for (const [signal, handler] of signalHandlers) process.off(signal, handler);
+  signalHandlers.clear();
+}
+
+function throwIfTerminating() {
+  if (terminationSignal != null) throw new Error(`canary ladder interrupted by ${terminationSignal}`);
+}
+
+function runBenchmark(rung, artifactRoot, invocationId, rustImageId) {
+  throwIfTerminating();
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['scripts/user_value_benchmark.mjs'], {
+      cwd: repoRoot,
+      env: canaryEnvironment(rung, artifactRoot, process.env, invocationId, rustImageId),
+      stdio: 'inherit'
+    });
+    activeChild = child;
+    let settled = false;
+    const finish = (result, error) => {
+      if (settled) return;
+      settled = true;
+      if (activeChild === child) activeChild = null;
+      if (error == null) resolve(result);
+      else reject(error);
+    };
+    child.once('error', (error) => finish(null, error));
+    child.once('close', (status, signal) => {
+      finish({ status, signal, error: null }, null);
+    });
+  });
 }
 
 function run(command, args) {
@@ -231,4 +335,4 @@ function capture(command, args) {
   return result.stdout.trim();
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main();

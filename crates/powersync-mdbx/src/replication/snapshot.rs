@@ -63,6 +63,15 @@ pub async fn run_initial_snapshot_if_enabled(
     let plan = service_context.active_plan();
     let source_identity =
         initial_snapshot_source_identity(&control.client, config, plan.as_ref()).await?;
+    let required_source_tables = plan
+        .source_tables()
+        .into_iter()
+        .map(CompiledTablePlan::source_table)
+        .collect::<Vec<_>>();
+    bootstrap
+        .ensure_publication_covers(&control.client, &required_source_tables)
+        .await
+        .map_err(|error| format!("validate initial snapshot publication: {error}"))?;
 
     if snapshot_complete {
         let persisted_identity = store
@@ -85,10 +94,6 @@ pub async fn run_initial_snapshot_if_enabled(
         });
     }
 
-    bootstrap
-        .ensure_publication(&control.client)
-        .await
-        .map_err(|error| format!("ensure initial snapshot publication: {error}"))?;
     let bootstrap_intent = initial_snapshot_bootstrap_intent(&source_identity);
     reconcile_incomplete_bootstrap(
         &control.client,

@@ -96,7 +96,7 @@ const audience = process.env.POWERSYNC_USER_VALUE_AUDIENCE ?? 'powersync-user-va
 const issuer = process.env.POWERSYNC_USER_VALUE_ISSUER ?? 'https://benchmark.powersync-mdbx.invalid';
 const jwtSecret = process.env.POWERSYNC_USER_VALUE_JWT_SECRET ?? `user-value-secret-${suffix}`;
 const apiToken = process.env.POWERSYNC_USER_VALUE_API_TOKEN ?? `user-value-api-token-${suffix}`;
-// Stable 1.23.3 multi-platform manifest, resolved 2026-07-11. Publication
+// Stable 1.23.3 multi-platform manifest. Publication
 // runs must still choose and attest the baseline explicitly.
 const officialImage =
   process.env.POWERSYNC_OFFICIAL_IMAGE ??
@@ -177,6 +177,16 @@ const retainRawValidationRecords = process.env.POWERSYNC_USER_VALUE_RETAIN_RAW_R
 const publicRun = process.env.POWERSYNC_USER_VALUE_PUBLIC_RUN === '1';
 const initialReadinessMode = process.env.POWERSYNC_USER_VALUE_INITIAL_READINESS ?? 'target-specific';
 const officialTuningReviewed = process.env.POWERSYNC_USER_VALUE_OFFICIAL_TUNING_REVIEWED === '1';
+const storageClassAttested = process.env.POWERSYNC_USER_VALUE_STORAGE_CLASS_ATTESTED === '1';
+const durabilityPolicyAttested = process.env.POWERSYNC_USER_VALUE_DURABILITY_POLICY_ATTESTED === '1';
+const storageClasses = {
+  official: optionalTextEnv('POWERSYNC_USER_VALUE_OFFICIAL_STORAGE_CLASS'),
+  rust: optionalTextEnv('POWERSYNC_USER_VALUE_RUST_STORAGE_CLASS')
+};
+const durabilityPolicies = {
+  official: optionalTextEnv('POWERSYNC_USER_VALUE_OFFICIAL_DURABILITY_POLICY'),
+  rust: optionalTextEnv('POWERSYNC_USER_VALUE_RUST_DURABILITY_POLICY')
+};
 const rustComparable = process.env.POWERSYNC_RUST_ALLOW_COMPARISON === '1';
 // Unrecorded paired repeats before the measured ones, to absorb cold-cache /
 // first-pull effects. 0 keeps the historical behavior.
@@ -222,8 +232,8 @@ const rustLiveUnifiedBench = process.env.POWERSYNC_RUST_LIVE_UNIFIED_BENCH !== '
 const rustInitialSnapshotEnabled = process.env.POWERSYNC_RUST_INITIAL_SNAPSHOT ?? '1';
 const rustPersistRawBatches = process.env.POWERSYNC_RUST_PERSIST_RAW_BATCHES ?? '0';
 const rustPrebuildEnabled = process.env.POWERSYNC_RUST_PREBUILD !== '0';
-// Default to the prebuilt binary so cargo's freshness check (or worse, a
-// dirty rebuild) never runs inside the measured processing window.
+// Default to the prebuilt binary so cargo freshness checks and rebuilds stay
+// outside the measured processing window.
 const rustUsePrebuiltBinary = process.env.POWERSYNC_RUST_USE_PREBUILT_BINARY !== '0';
 const rustCargoProfile = (process.env.POWERSYNC_RUST_CARGO_PROFILE ?? 'release').trim() || 'release';
 const rustCargoBuildArgs = rustProfileArgs(rustCargoProfile);
@@ -367,6 +377,10 @@ try {
       officialMongoCacheGb,
       officialNodeOptions,
       officialTuningReviewed,
+      storageClassAttested,
+      durabilityPolicyAttested,
+      storageClasses,
+      durabilityPolicies,
       dockerImageInputs: dockerImageInputs(),
       officialConfigExtraApplied: officialConfigExtraYaml != null,
       officialConfigExtraSha256:
@@ -602,6 +616,11 @@ function memoryLimitBytes(value) {
   return Number(match[1]) * scale;
 }
 
+function optionalTextEnv(name) {
+  const value = process.env[name]?.trim();
+  return value ? value : null;
+}
+
 function effectiveProjectBucketSampleCount({ requested, availableProjects, enabled }) {
   if (!enabled) return 0;
   return Math.min(Math.max(1, requested), availableProjects);
@@ -630,7 +649,11 @@ function runtimePublicRunPreflightInput() {
       serviceLimitsExplicit &&
       mongoLimitsExplicit &&
       resourceBudgetMatches,
-    sameStorageClass: symmetricDockerRuntime,
+    sameStoragePlacement: symmetricDockerRuntime,
+    storageClassAttested,
+    durabilityPolicyAttested,
+    storageClasses,
+    durabilityPolicies,
     samePostgresNetworkPath:
       symmetricDockerRuntime && process.env.POWERSYNC_RUST_POSTGRES_REPLICATION_URI == null,
     imageInputs: dockerImageInputs(),
@@ -667,7 +690,17 @@ function assertPublicRunPreflight(input) {
     issues.push(`deployment model must be symmetric Linux containers, got ${input.deploymentModel ?? 'unknown'}`);
   }
   if (input.equalCpuMemoryLimits !== true) issues.push('identical explicit CPU and memory limits are required');
-  if (input.sameStorageClass !== true) issues.push('both targets must use the same storage class and durability policy');
+  if (input.sameStoragePlacement !== true) issues.push('both target data paths must share the symmetric runner storage placement');
+  if (input.storageClassAttested !== true) issues.push('the benchmark operator must attest that both targets use the same storage class');
+  if (input.durabilityPolicyAttested !== true) issues.push('the benchmark operator must attest that target durability policies are comparable');
+  for (const target of ['official', 'rust']) {
+    if (typeof input.storageClasses?.[target] !== 'string' || input.storageClasses[target].trim() === '') {
+      issues.push(`${target} storage class must be recorded`);
+    }
+    if (typeof input.durabilityPolicies?.[target] !== 'string' || input.durabilityPolicies[target].trim() === '') {
+      issues.push(`${target} durability policy must be recorded`);
+    }
+  }
   if (input.samePostgresNetworkPath !== true) issues.push('both targets must use the same PostgreSQL placement and network path');
   const requiredImages =
     input.deploymentModel === 'symmetric-linux-containers'
@@ -5379,20 +5412,20 @@ function compareMetric({ baselineValue, candidateValue }) {
       baselineP95Ms: baselineP95,
       candidateP95Ms: candidateP95,
       deltaMs: null,
-      speedupVsBaseline: null,
-      p95Ratio: Number.isFinite(baselineP95) && Number.isFinite(candidateP95) ? round(baselineP95 / candidateP95) : null
+      ratioOfP50s: null,
+      ratioOfP95s: Number.isFinite(baselineP95) && Number.isFinite(candidateP95) ? round(baselineP95 / candidateP95) : null
     };
   }
   const deltaMs = round(candidateP50 - baselineP50);
-  const speedupVsBaseline = round(baselineP50 / candidateP50);
+  const ratioOfP50s = round(baselineP50 / candidateP50);
   return {
     baselineP50Ms: round(baselineP50),
     candidateP50Ms: round(candidateP50),
     baselineP95Ms: Number.isFinite(baselineP95) ? round(baselineP95) : null,
     candidateP95Ms: Number.isFinite(candidateP95) ? round(candidateP95) : null,
     deltaMs,
-    speedupVsBaseline,
-    p95Ratio: Number.isFinite(baselineP95) && Number.isFinite(candidateP95) ? round(baselineP95 / candidateP95) : null
+    ratioOfP50s,
+    ratioOfP95s: Number.isFinite(baselineP95) && Number.isFinite(candidateP95) ? round(baselineP95 / candidateP95) : null
   };
 }
 
@@ -5605,6 +5638,12 @@ function formatIntervalWithSource(value, source, currentSourceDefaultMs) {
   return `Rust binary default (not set by harness${sourceDefault})`;
 }
 
+function displayTargetLabel(label) {
+  if (label === 'official') return 'Official';
+  if (label === 'rust') return 'Rust/MDBX';
+  return String(label);
+}
+
 function renderMarkdown({ results, comparisons }) {
   const methodology = results.methodology ?? {};
   const lines = [];
@@ -5615,28 +5654,29 @@ function renderMarkdown({ results, comparisons }) {
   lines.push('');
   lines.push('## Method');
   lines.push('');
-  lines.push('- same dataset, sync rules, browser fixture, auth token shape, and target user across all targets');
-  lines.push(`- routed access mode: ${methodology.fairness?.routedAccess ?? results.config?.accessMode ?? 'n/a'}`);
-  lines.push('- parity gates compare checkpoint counts/checksums plus client-visible operation digests, not only timings');
+  lines.push('- Same dataset, sync rules, browser fixture, auth token shape, and target user across all targets.');
+  lines.push(`- Routed access mode: ${methodology.fairness?.routedAccess ?? results.config?.accessMode ?? 'n/a'}.`);
+  lines.push('- Parity gates compare checkpoint counts/checksums and client-visible operation digests.');
   lines.push(
-    `- target order ${methodology.fairness?.interleavedTargets ? 'is interleaved across repeats/scenarios' : 'is fixed (interleaving disabled)'}`
+    `- Target order ${methodology.fairness?.interleavedTargets ? 'is interleaved across repeats/scenarios.' : 'is fixed because interleaving is disabled.'}`
   );
-  lines.push(`- cold-open readiness: ${methodology.fairness?.endUserColdOpenReadiness ?? 'n/a'}`);
-  lines.push(`- rust replication feedback intervals: ${describeRustReplicationFeedback(results.config)}`);
+  lines.push(`- Cold-open readiness: ${methodology.fairness?.endUserColdOpenReadiness ?? 'n/a'}.`);
+  lines.push(`- Rust replication feedback intervals: ${describeRustReplicationFeedback(results.config)}.`);
   lines.push(
-    '- lifecycle scenarios are diagnostic only when explicitly enabled; Rust rejects reprocessing and layout-changing deploys until atomic generation activation exists'
+    '- Lifecycle scenarios run only when enabled; Rust rejects reprocessing and layout-changing deploys until atomic generation activation exists.'
   );
+  lines.push('- Comparison ratios divide target p50s; they are not medians of paired-repeat ratios and do not attribute causality.');
   lines.push('');
   for (const [label, target] of Object.entries(results.targets)) {
     const churnRows = [];
     if (results.config?.churnGateMode === 'slot-lsn') {
-      churnRows.push(['Slot-LSN ack catch-up', 'slotAckCatchupMs']);
+      churnRows.push(['Replication-slot confirmed-flush catch-up', 'slotAckCatchupMs']);
     } else {
       churnRows.push(['Subsequent churn catch-up', 'replicationCatchupMs']);
     }
     churnRows.push(['Churn to protocol verified', 'churnToProtocolVerifiedMs']);
 
-    lines.push(`## ${label}`);
+    lines.push(`## ${displayTargetLabel(label)}`);
     lines.push('');
     lines.push('### Developer usability');
     lines.push('');
@@ -5703,12 +5743,12 @@ function renderMarkdown({ results, comparisons }) {
   }
 
   if (comparisons.length > 0) {
-    lines.push('## Official vs Rust comparisons');
+    lines.push('## Official baseline comparisons');
     lines.push('');
     for (const comparison of comparisons) {
-      lines.push(`### official vs ${comparison.candidateLabel}`);
+      lines.push(`### Official vs ${displayTargetLabel(comparison.candidateLabel)}`);
       lines.push('');
-      lines.push('| Metric | Official p50 | Candidate p50 | Delta | Speedup |');
+      lines.push('| Metric | Official p50 | Candidate p50 | Delta | Ratio of p50s (official/candidate) |');
       lines.push('| --- | ---: | ---: | ---: | ---: |');
       for (const [metricPath, metric] of Object.entries({
         ...comparison.developerUsability,
@@ -5716,7 +5756,7 @@ function renderMarkdown({ results, comparisons }) {
         ...comparison.recovery
       })) {
         lines.push(
-          `| ${metricPath} | ${formatMs(metric.baselineP50Ms)} | ${formatMs(metric.candidateP50Ms)} | ${formatMs(metric.deltaMs)} | ${formatFold(metric.speedupVsBaseline)} |`
+          `| ${metricPath} | ${formatMs(metric.baselineP50Ms)} | ${formatMs(metric.candidateP50Ms)} | ${formatMs(metric.deltaMs)} | ${formatRatio(metric.ratioOfP50s)} |`
         );
       }
       lines.push('');
@@ -6080,7 +6120,7 @@ function formatBytes(value) {
   return `${scaled.toFixed(unit === 0 ? 0 : 2)} ${units[unit]}`;
 }
 
-function formatFold(value) {
+function formatRatio(value) {
   return value == null ? 'n/a' : `${value.toFixed(2)}x`;
 }
 

@@ -1,15 +1,11 @@
-//! Differential eval-equivalence net for the planned structured-predicate swap.
+//! Golden tests for sync-rule predicate evaluation.
 //!
-//! The golden corpus (`sync_rules_golden.rs`) pins the *parse* output. This pins
-//! the *evaluation* behavior — the thing that actually matters and that the
-//! structured rewrite of `eval.rs` must preserve exactly. For each filter-bearing
-//! rule we run a battery of synthetic rows / request contexts through the current
-//! evaluator and snapshot the boolean (and projection) results to
+//! The golden corpus (`sync_rules_golden.rs`) pins the parse output. This suite
+//! pins evaluation behavior. For each filter-bearing rule it runs synthetic rows
+//! and request contexts through the evaluator and snapshots boolean and projection results in
 //! `tests/sync_rules_eval_golden.snapshot`.
 //!
-//! After the row_filter/request_filter representation is restructured, these
-//! results MUST stay identical (the snapshot is the old behavior). Regenerate
-//! intentionally with:
+//! Regenerate the snapshot intentionally with:
 //!
 //!     REGEN_SYNC_RULES_EVAL_GOLDEN=1 cargo test --test sync_rules_eval_golden
 
@@ -203,7 +199,7 @@ streams:
         }
     }
 
-    // --- Gap B: row-filter `=` exercises json_values_equal coercion (both operand orders).
+    // Row-filter equality exercises directional JSON scalar coercion.
     {
         let plan = lower(
             ROW_FILTER_RULE
@@ -278,7 +274,7 @@ streams:
         }
     }
 
-    // --- Gap C: row-filter `IN` (otherwise-untested branch): array membership + scalar fallback.
+    // Row-filter `IN` covers array membership and the scalar fallback.
     {
         let plan = lower(
             ROW_FILTER_RULE
@@ -305,8 +301,8 @@ streams:
         }
     }
 
-    // --- Gap E: row-filter IS NULL — missing key and JSON null both count as null; an
-    //            empty string does NOT in the row context (unlike the request context).
+    // Row-filter IS NULL treats a missing key and JSON null as null. An empty
+    // string is not null in the row context, unlike the request context.
     {
         let plan = lower(
             ROW_FILTER_RULE
@@ -335,11 +331,9 @@ streams:
         }
     }
 
-    // --- Gap A-fix: `bucket."workspaceId" IN "Issue"."workspaceIds"` lowers to a *route* constraint,
-    //     so array membership is decided by `route_json_array_contains` against the request's
-    //     route field — NOT by the row's own `workspaceIds` column. The earlier `array_column_in_route`
-    //     section varies the row data (which the route match ignores); vary the route here to
-    //     actually exercise membership: array-contains, array-misses, scalar-equal, scalar-differ.
+    // `bucket."workspaceId" IN "Issue"."workspaceIds"` lowers to a route constraint.
+    // Membership is evaluated against the request route field, not the row's own
+    // `workspaceIds` column. Vary the route here to cover array and scalar values.
     {
         let plan = lower(
             r#"
@@ -376,7 +370,7 @@ streams:
         }
     }
 
-    // --- Gap D: 3-way OR (split_or_predicates beyond two terms) mixing IS NULL and `=`.
+    // Three-way OR covers mixed IS NULL and equality predicates.
     {
         let plan = lower(
             ROW_FILTER_RULE
@@ -408,7 +402,7 @@ streams:
         }
     }
 
-    // --- Gap D (cont.): nested/double parens — trim_wrapping_parens must peel both layers.
+    // Nested parentheses exercise repeated wrapper removal.
     {
         let plan = lower(
             ROW_FILTER_RULE
@@ -432,8 +426,7 @@ streams:
         }
     }
 
-    // --- Gap F: request-context IS NULL. Unlike the row context (Gap E), a present-but-empty
-    //     string counts as null here, alongside an absent binding.
+    // Request-context IS NULL treats both an absent binding and an empty string as null.
     {
         let canonical = compile_sync_rules_source(
             r#"
@@ -465,8 +458,7 @@ streams:
         }
     }
 
-    // --- Gap G: reversed request equality `'literal' = binding` parses and evaluates the
-    //     same as `binding = 'literal'` (the literal-left order must be preserved).
+    // Reversed request equality preserves literal-left operand order.
     {
         let canonical = compile_sync_rules_source(
             r#"
@@ -501,7 +493,7 @@ streams:
         }
     }
 
-    // --- Gap H: request filter with two AND'd binding predicates — both must hold.
+    // Request filters with two binding predicates require both to match.
     {
         let canonical = compile_sync_rules_source(
             r#"
@@ -539,8 +531,7 @@ streams:
         }
     }
 
-    // --- Gap K: a query with neither a row filter nor a request filter — both fast-paths
-    //     return true regardless of input.
+    // Queries without row or request filters take the unconditional fast paths.
     {
         let plan = lower(
             r#"
@@ -579,8 +570,7 @@ streams:
         );
     }
 
-    // --- Gap J: default-bucket request-filter threading. An auto_subscribe stream with no
-    //     bucket parameters but a request filter is only returned when the request matches.
+    // An auto-subscribe stream without bucket parameters still applies its request filter.
     {
         let plan = lower(
             r#"
@@ -612,10 +602,8 @@ streams:
         }
     }
 
-    // --- Literal-token IS NULL (regression for a review-caught divergence). A row-context
-    //     IS NULL operand is resolved purely by column lookup, never as a literal: `5 IS NULL`
-    //     tests the (absent) column "5", it does NOT test whether the integer 5 is null. The
-    //     structured rewrite must keep this — absent column ⇒ null.
+    // A row-context IS NULL operand is resolved by column lookup: `5 IS NULL`
+    // tests the column "5", not the integer literal 5. An absent column is null.
     {
         let plan = lower(ROW_FILTER_RULE.replace("{FILTER}", "5 IS NULL").as_str());
         let bucket = plan
@@ -697,7 +685,7 @@ streams:
     );
     assert_eq!(
         out, expected,
-        "evaluator behavior drifted; the structured-predicate rewrite must preserve it exactly"
+        "sync-rule evaluator behavior drifted from the golden snapshot"
     );
 }
 

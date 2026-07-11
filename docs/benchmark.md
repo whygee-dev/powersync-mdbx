@@ -2,9 +2,9 @@
 
 ## Claim boundary
 
-The harness measures one generated workload and a constrained set of client-visible fields. It does not measure full PowerSync compatibility, production reliability, operational cost, or the causal effect of any single language or storage engine.
+The harness measures initial replication and deterministic churn for one generated workload and a constrained set of client-visible fields. It does not exercise unsupported protocol/rule forms, failover, backup/restore, rolling upgrades, or mixed read/write workloads, and it cannot isolate the effect of one language, storage engine, or architectural choice.
 
-The checked-in `100k-auth-perimeter`, `1m-auth-perimeter`, and `1m-parity-gated` data is historical and exploratory. Those runs predate the current correctness and security changes, do not identify a Git commit, and used different deployment topologies for the official and Rust targets. They are not evidence of current-tree performance. The separate symmetric canary identifies its commit and uses a symmetric container topology. It supports the four observed official/Rust elapsed-time ratios for that workload and configuration; one ordered pair per rung does not estimate a stable distribution, tail latency, or a causal product-level effect.
+The checked-in `100k-auth-perimeter`, `1m-auth-perimeter`, and `1m-parity-gated` data is historical and exploratory. Those runs predate the current correctness and security changes, do not identify a Git commit, and used different deployment topologies for the official and Rust targets. They are not evidence of current-tree performance. The separate symmetric scale canary identifies its commit and uses a symmetric container topology. It supports the four observed official/Rust elapsed-time ratios for that workload and configuration; one ordered pair per rung does not estimate a performance distribution or tail latency and cannot isolate the contribution of any one component.
 
 ## Historical topology and current timing controls
 
@@ -32,8 +32,8 @@ total CPU/memory budget per target: Rust receives the total directly, while
 the official target splits the same total between its service and MongoDB.
 Both MongoDB and MDBX use bind mounts below the same run artifact root. This
 controls process model, aggregate resource ceiling, host filesystem, and
-network placement; it does not pretend MongoDB and MDBX have identical engine
-semantics. MongoDB provisioning remains outside the measured window because
+network placement. It does not equalize MongoDB and MDBX storage semantics.
+MongoDB provisioning remains outside the measured window because
 it is a separate required storage service, while both measured service starts
 create a fresh container.
 
@@ -43,7 +43,7 @@ The symmetric runner captures a baseline immediately before measured service sta
 
 Each Linux container is measured through cgroup v2 and its PID-1 `/proc` namespace: cumulative CPU time, cgroup current and lifetime peak memory, container init-process current and lifetime peak RSS, block reads/writes, and network receive/transmit counters. On native Linux the runner reads those files through the host; on Docker Desktop it reads the same container-scoped files with `docker exec`. Storage paths are walked to record both logical bytes and filesystem-allocated bytes. PostgreSQL insert-LSN distance records the cluster-wide inserted WAL-position delta during each phase.
 
-The official target is reported as separate service and MongoDB components; Rust is reported as one service component. Network traffic is not summed across official components because service-to-MongoDB traffic is visible in both network namespaces. The memory high-water marks are lifetime diagnostics, not measurement-window stack peaks, and MongoDB can include provisioning before the baseline. WAL position is cluster-wide and is not the number of bytes decoded or stored by either target.
+The official target is reported as separate service and MongoDB components; Rust is reported as one service component. Network traffic is not summed across official components because service-to-MongoDB traffic is visible in both network namespaces. The memory high-water marks are lifetime diagnostics, not measurement-window peaks, and MongoDB can include provisioning before the baseline. WAL position is cluster-wide and is not the number of bytes decoded or stored by either target.
 
 If container cgroup or `/proc` counters are unavailable, the harness falls back to Docker stats: instantaneous CPU percentage, current memory, and cumulative block/network counters. It reports cumulative CPU time and peak RSS as unavailable rather than zero. Publication mode rejects incomplete fallback evidence.
 
@@ -63,20 +63,20 @@ This is exact equivalence for the probed buckets and fields, not strict protocol
 
 ## Historical checked-in runs
 
-The `100k-auth-perimeter` and `1m-auth-perimeter` runs were recorded on June 14, 2026. They used one unrecorded warmup pair and five measured pairs with interleaved target order. Material changes since that run include snapshot/slot handoff, readiness, cursor recovery, authentication, TLS, tail retention, and response reads; the table must not be attributed to the current implementation.
+The `100k-auth-perimeter` and `1m-auth-perimeter` runs used one unrecorded warmup pair and five measured pairs with interleaved target order. Material changes since those runs include snapshot/slot handoff, readiness, cursor recovery, authentication, TLS, tail retention, and response reads; the table must not be attributed to the current implementation.
 
 | Profile | Source task rows | Probed buckets | Official median startup-to-ready | Rust median startup-to-ready | Ratio of medians |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | `100k` | 100,102 | 251 | 7,035.711 ms | 915.083 ms | 7.689x |
 | `1m` | 1,000,402 | 1,000 | 57,886.216 ms | 5,046.112 ms | 11.471x |
 
-The table reports ratios of medians, not paired-repeat speedups. Five samples are enough to expose gross repeatability problems, but not enough to estimate tail latency. Retained per-target timing p95 fields are traceability data and must not be cited as SLO evidence.
+The table reports ratios of medians, not paired-repeat speedups. The five samples show the recorded run-to-run spread but do not estimate tail latency. Retained per-target timing p95 fields are traceability data, not SLO estimates.
 
 The older `1m-parity-gated` artifact is a historical, single-sample subscription-parameter run. It is not comparable to the later auth-perimeter runs and should not be used as supporting evidence.
 
 ## Artifact limits
 
-Checked-in artifacts omit raw per-bucket observations and therefore are validation summaries, not independent proof. The original runs recorded mutable Docker tags rather than resolved image digests and did not record Git/file hashes. A fresh harness run now records:
+Checked-in artifacts omit raw per-bucket observations. They preserve aggregate validation outcomes but cannot be revalidated record by record. The original runs recorded mutable Docker tags rather than resolved image digests and did not record Git/file hashes. A fresh harness run now records:
 
 - Git commit and dirty state;
 - SHA-256 hashes for both lockfiles, the harness, resource collector, fixture, generated rules, and Rust executable;
@@ -85,17 +85,15 @@ Checked-in artifacts omit raw per-bucket observations and therefore are validati
 - resolved Docker image ids and repository digests;
 - the exact requested image references for the official service, MongoDB, PostgreSQL, and either the Rust service image or `socat`, depending on the runner.
 
-Regenerating with the same configuration does not reproduce an old run exactly unless the toolchain, image digests, code, storage, host resources, and cache state also match.
-
 Each run uses a unique append-only directory. The harness refuses `POWERSYNC_USER_VALUE_CLEAN_TMP=1`; it never bulk-deletes earlier matrix samples. `POWERSYNC_USER_VALUE_ARTIFACT_ROOT` selects a durable output root. With `POWERSYNC_USER_VALUE_RETAIN_RAW_RECORDS=1`, each validation batch writes a gzip-compressed sidecar containing the per-bucket protocol records while the ordinary JSON result retains compact digests and samples.
 
 ## Requirements for a public comparison
 
-A defensible comparison should:
+A public comparison must:
 
 1. run both targets on Linux under the same process/container model;
 2. apply the same aggregate CPU and memory budget to each target and record the official service/MongoDB split;
-3. use the same storage class and durability expectations;
+3. record each target's storage class and durability policy, then attest the storage classes are the same and the durability policies are comparable;
 4. pin all container images by digest;
 5. use identical PostgreSQL placement and network paths;
 6. report client-visible readiness, target-specific complete materialization, and replication-slot confirmed-flush position as separate boundaries;
@@ -105,7 +103,7 @@ A defensible comparison should:
 10. include official-service tuning proposed or reviewed by the PowerSync team;
 11. rerun the current tree after every material snapshot, cursor, durability, authentication, or readiness change.
 
-`POWERSYNC_USER_VALUE_PUBLIC_RUN=1` checks the static conditions before starting PostgreSQL or pulling an image, then rejects a run if any required Linux cgroup/proc resource field is unavailable. It also requires a clean worktree, `symmetric-docker` on a Linux host, an explicit matching target budget and official service/MongoDB split, interleaved targets, at least one warmup pair, the initial and churn protocol gates, `slot-lsn`, `sync-protocol`, raw-record retention, digest-pinned official/MongoDB/PostgreSQL/Rust image references, and an explicit attestation that official tuning was reviewed. A locally built Rust tag can exercise the runner but cannot pass publication preflight.
+`POWERSYNC_USER_VALUE_PUBLIC_RUN=1` checks the static conditions before starting PostgreSQL or pulling an image, then rejects a run if any required Linux cgroup/proc resource field is unavailable. It also requires a clean worktree, `symmetric-docker` on a Linux host, an explicit matching target budget and official service/MongoDB split, interleaved targets, at least one warmup pair, the initial and churn protocol gates, `slot-lsn`, `sync-protocol`, raw-record retention, digest-pinned official/MongoDB/PostgreSQL/Rust image references, and explicit attestations that official tuning was reviewed, both targets use the same storage class, and their durability policies are comparable. Record the target-specific values in `POWERSYNC_USER_VALUE_OFFICIAL_STORAGE_CLASS`, `POWERSYNC_USER_VALUE_RUST_STORAGE_CLASS`, `POWERSYNC_USER_VALUE_OFFICIAL_DURABILITY_POLICY`, and `POWERSYNC_USER_VALUE_RUST_DURABILITY_POLICY`; the harness persists all four in `results.json`. Set `POWERSYNC_USER_VALUE_OFFICIAL_TUNING_REVIEWED=1`, `POWERSYNC_USER_VALUE_STORAGE_CLASS_ATTESTED=1`, and `POWERSYNC_USER_VALUE_DURABILITY_POLICY_ATTESTED=1` only after reviewing those controls. A locally built Rust image tag can exercise the runner but cannot pass publication preflight.
 
 ## Command
 

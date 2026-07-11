@@ -159,7 +159,11 @@ test('public benchmark preflight accepts only a fully specified publication run'
     targets: ['official', 'rust'],
     deploymentModel: 'symmetric-linux-containers',
     equalCpuMemoryLimits: true,
-    sameStorageClass: true,
+    sameStoragePlacement: true,
+    storageClassAttested: true,
+    durabilityPolicyAttested: true,
+    storageClasses: { official: 'local-nvme', rust: 'local-nvme' },
+    durabilityPolicies: { official: 'journaled', rust: 'durable-sync' },
     samePostgresNetworkPath: true,
     imageInputs: { official: digest, mongo: digest, rust: digest, postgres: digest },
     readinessBoundary: 'sync-protocol-checkpoint-complete',
@@ -189,7 +193,11 @@ test('public benchmark preflight rejects a target resource budget mismatch', () 
     targets: ['official', 'rust'],
     deploymentModel: 'symmetric-linux-containers',
     equalCpuMemoryLimits: true,
-    sameStorageClass: true,
+    sameStoragePlacement: true,
+    storageClassAttested: true,
+    durabilityPolicyAttested: true,
+    storageClasses: { official: 'local-nvme', rust: 'local-nvme' },
+    durabilityPolicies: { official: 'journaled', rust: 'durable-sync' },
     samePostgresNetworkPath: true,
     imageInputs: { official: digest, mongo: digest, rust: digest, postgres: digest },
     readinessBoundary: 'sync-protocol-checkpoint-complete',
@@ -208,6 +216,14 @@ test('public benchmark preflight rejects a target resource budget mismatch', () 
   assert.throws(
     () => assertPublicRunPreflight({ ...base, equalCpuMemoryLimits: false }),
     /identical explicit CPU and memory limits/
+  );
+  assert.throws(
+    () => assertPublicRunPreflight({ ...base, storageClassAttested: false, durabilityPolicyAttested: false }),
+    /same storage class.*durability policies are comparable/s
+  );
+  assert.throws(
+    () => assertPublicRunPreflight({ ...base, storageClasses: {}, durabilityPolicies: {} }),
+    /official storage class must be recorded.*official durability policy must be recorded.*rust storage class must be recorded.*rust durability policy must be recorded/s
   );
 });
 
@@ -562,9 +578,12 @@ test('benchmark markdown renders slot-lsn side metrics and persisted-catchup iss
 
   assert.match(
     markdown,
-    /rust replication feedback intervals: status=Rust binary default \(not set by harness; checked-in source default 1000ms\), idle=250ms \(env override\)/
+    /Rust replication feedback intervals: status=Rust binary default \(not set by harness; checked-in source default 1000ms\), idle=250ms \(env override\)\./
   );
-  assert.match(markdown, /Slot-LSN ack catch-up/);
+  assert.match(markdown, /Replication-slot confirmed-flush catch-up/);
+  assert.match(markdown, /## Official/);
+  assert.match(markdown, /## Rust\/MDBX/);
+  assert.match(markdown, /Ratio of p50s \(official\/candidate\)/);
   assert.match(markdown, /churn r2: Rust persisted catch-up observation unavailable: tail_ops_written did not advance/);
 
   const targetSpecificTargets = benchmarkTargets();

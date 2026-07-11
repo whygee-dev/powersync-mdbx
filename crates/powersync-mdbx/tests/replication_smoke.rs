@@ -22,6 +22,7 @@ use powersync_mdbx::{
             run_replication_ingest_with_store, ReplicationRunnerOptions, ReplicationStream,
             ReplicationStreamEvent,
         },
+        runtime::ReplicationBootstrap,
         PostgresReplicationConfig,
     },
     storage::WireMdbxStorage,
@@ -98,6 +99,127 @@ async fn streams_a_unique_logical_message_from_postgres() {
     context.finish().await;
 
     assert!(found, "expected to receive the emitted logical message");
+}
+
+#[tokio::test]
+#[ignore = "requires a live PostgreSQL; run via cargo test --test replication_smoke -- --ignored"]
+async fn validates_explicit_publication_shape_from_postgres_catalogs() {
+    let _guard = live_test_guard().await;
+    let context = LiveReplicationContext::new("rust_publication", Some("tasks")).await;
+    context
+        .client
+        .batch_execute(&format!(
+            "CREATE PUBLICATION \"{}\" FOR TABLE tasks",
+            context.publication_name
+        ))
+        .await
+        .expect("create unrestricted explicit publication");
+
+    let bootstrap = ReplicationBootstrap::from_config(&context.config, PostgresLsn(0))
+        .expect("replication bootstrap");
+    let control_plane = bootstrap
+        .connect_control_plane()
+        .await
+        .expect("connect publication validator");
+    bootstrap
+        .ensure_publication_covers(&control_plane.client, &["tasks"])
+        .await
+        .expect("unrestricted explicit publication should be accepted");
+
+    context
+        .client
+        .batch_execute(&format!(
+            "ALTER PUBLICATION \"{}\" SET TABLE tasks WHERE (status = 'active')",
+            context.publication_name
+        ))
+        .await
+        .expect("add publication row filter");
+    let error = bootstrap
+        .ensure_publication_covers(&control_plane.client, &["tasks"])
+        .await
+        .expect_err("filtered publication should be rejected");
+    assert!(error
+        .to_string()
+        .contains("uses row filters for required source tables: public.tasks"));
+
+    context
+        .client
+        .batch_execute(&format!(
+            "ALTER PUBLICATION \"{}\" SET TABLE tasks (id, org_id, project_id, title, status, priority, assignee_id, story_points, updated_at, summary)",
+            context.publication_name
+        ))
+        .await
+        .expect("replace row filter with explicit column list");
+    bootstrap
+        .ensure_publication_covers(&control_plane.client, &["tasks"])
+        .await
+        .expect("a complete explicit column list should be accepted");
+
+    context
+        .client
+        .batch_execute(&format!(
+            "ALTER PUBLICATION \"{}\" SET TABLE tasks (id, org_id, project_id, title, status, priority, assignee_id, story_points, updated_at)",
+            context.publication_name
+        ))
+        .await
+        .expect("omit one publication column");
+    let error = bootstrap
+        .ensure_publication_covers(&control_plane.client, &["tasks"])
+        .await
+        .expect_err("an incomplete publication column list should be rejected");
+    assert!(error
+        .to_string()
+        .contains("omits columns from required source tables: public.tasks"));
+
+    context
+        .client
+        .batch_execute(&format!(
+            "ALTER PUBLICATION \"{}\" SET TABLE tasks; \
+             ALTER TABLE tasks ADD COLUMN title_length integer GENERATED ALWAYS AS (length(title)) STORED",
+            context.publication_name
+        ))
+        .await
+        .expect("add generated source column");
+    let error = bootstrap
+        .ensure_publication_covers(&control_plane.client, &["tasks"])
+        .await
+        .expect_err("unpublished generated column should be rejected");
+    assert!(error
+        .to_string()
+        .contains("omits columns from required source tables: public.tasks"));
+
+    context
+        .client
+        .batch_execute(&format!(
+            "CREATE TABLE partitioned_tasks (id text, region integer) PARTITION BY LIST (region); \
+             CREATE TABLE partitioned_tasks_1 PARTITION OF partitioned_tasks FOR VALUES IN (1); \
+             DROP PUBLICATION \"{}\"; \
+             CREATE PUBLICATION \"{}\" FOR ALL TABLES",
+            context.publication_name, context.publication_name
+        ))
+        .await
+        .expect("publish all tables including partitioned parent");
+    let error = bootstrap
+        .ensure_publication_covers(&control_plane.client, &["partitioned_tasks"])
+        .await
+        .expect_err("partitioned source parent should be rejected");
+    assert!(
+        error.to_string().contains(
+            "uses partition or inheritance parents as required source tables: public.partitioned_tasks"
+        ),
+        "unexpected publication validation error: {error}"
+    );
+    context
+        .client
+        .batch_execute("DROP TABLE partitioned_tasks")
+        .await
+        .expect("drop partitioned test table");
+
+    control_plane
+        .shutdown()
+        .await
+        .expect("close publication validator");
+    context.finish().await;
 }
 
 #[tokio::test]

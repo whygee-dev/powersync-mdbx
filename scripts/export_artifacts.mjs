@@ -68,7 +68,7 @@ if (exported.length === 0) {
   process.exit(1);
 }
 console.log(`exported ${exported.join(', ')} -> ${path.relative(repoRoot, outDir)}`);
-console.log('remember to add or update the README.md in that directory describing the run shape.');
+console.log('Add or update the artifact README to describe the run configuration and evidence retained.');
 
 function buildParitySummary({ results, compare }) {
   const comparison = compare.comparisons?.[0] ?? {};
@@ -182,7 +182,7 @@ function comparisonMetricSummary(metric) {
     officialMedianMs: metric.baselineP50Ms ?? null,
     rustMedianMs: metric.candidateP50Ms ?? null,
     medianDeltaMs: metric.deltaMs ?? null,
-    ratioOfMedians: metric.speedupVsBaseline ?? null
+    ratioOfMedians: metric.ratioOfP50s ?? metric.speedupVsBaseline ?? null
   };
 }
 

@@ -506,6 +506,33 @@ pub async fn run_replication_ingest_with_store(
         .await
 }
 
+struct RuntimeReadinessGuard {
+    readiness: Option<Arc<AtomicBool>>,
+}
+
+impl RuntimeReadinessGuard {
+    fn new(readiness: Option<Arc<AtomicBool>>) -> Self {
+        if let Some(readiness) = &readiness {
+            readiness.store(false, Ordering::Release);
+        }
+        Self { readiness }
+    }
+
+    fn mark_connected(&self) {
+        if let Some(readiness) = &self.readiness {
+            readiness.store(true, Ordering::Release);
+        }
+    }
+}
+
+impl Drop for RuntimeReadinessGuard {
+    fn drop(&mut self) {
+        if let Some(readiness) = &self.readiness {
+            readiness.store(false, Ordering::Release);
+        }
+    }
+}
+
 async fn run_replication_ingest_with_store_and_readiness(
     config: &PostgresReplicationConfig,
     options: ReplicationRunnerOptions,
@@ -513,19 +540,18 @@ async fn run_replication_ingest_with_store_and_readiness(
     service_context: ServiceContext,
     runtime_readiness: Option<Arc<AtomicBool>>,
 ) -> Result<ReplicationRunSummary, ReplicationRunnerError> {
+    let runtime_readiness = RuntimeReadinessGuard::new(runtime_readiness);
     let mut decoder = PgOutputBatchDecoder::new();
     let snapshot_summary = run_initial_snapshot_if_enabled(config, &store, &service_context)
         .await
         .map_err(ReplicationRunnerError::Other)?;
-    if let Some(runtime_readiness) = runtime_readiness {
-        runtime_readiness.store(true, Ordering::Release);
-    }
     let durable_lsn = store.last_persisted_end_lsn()?.ok_or_else(|| {
         ReplicationRunnerError::Other(
             "initial snapshot completed without a durable resume LSN".to_owned(),
         )
     })?;
     let mut runner = ReplicationRunner::connect_existing(config, options, durable_lsn).await?;
+    runtime_readiness.mark_connected();
     let start_lsn = runner.start_lsn();
 
     info!(
@@ -612,12 +638,17 @@ impl From<ReplicationIngestError> for ReplicationRunnerError {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
+
     use bytes::Bytes;
     use pgwire_replication::{Lsn, ReplicationEvent};
 
     use super::{
         ReplicationRunSummary, ReplicationRunnerConfigError, ReplicationRunnerOptions,
-        ReplicationStreamEvent,
+        ReplicationStreamEvent, RuntimeReadinessGuard,
     };
     use crate::replication::postgres::PostgresLsn;
 
@@ -647,6 +678,29 @@ mod tests {
                 value: "bogus".to_owned(),
             }
         );
+    }
+
+    #[test]
+    fn runtime_readiness_starts_false_until_replication_connects() {
+        let readiness = Arc::new(AtomicBool::new(true));
+        let guard = RuntimeReadinessGuard::new(Some(Arc::clone(&readiness)));
+
+        assert!(!readiness.load(Ordering::Acquire));
+
+        guard.mark_connected();
+        assert!(readiness.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn runtime_readiness_clears_when_replication_runner_exits() {
+        let readiness = Arc::new(AtomicBool::new(false));
+        {
+            let guard = RuntimeReadinessGuard::new(Some(Arc::clone(&readiness)));
+            guard.mark_connected();
+            assert!(readiness.load(Ordering::Acquire));
+        }
+
+        assert!(!readiness.load(Ordering::Acquire));
     }
 
     #[test]

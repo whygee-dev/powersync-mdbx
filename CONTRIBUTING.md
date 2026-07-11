@@ -1,6 +1,6 @@
 # Contributing
 
-The most useful contributions improve correctness, benchmark fairness, or the official baseline. The repository is a research prototype, not a supported PowerSync distribution.
+The most useful contributions improve correctness, benchmark fairness, or the official baseline. This repository implements an independent replication path; it does not distribute or modify the official PowerSync service.
 
 ## Local checks
 
@@ -47,4 +47,4 @@ Do not hand-edit generated JSON artifacts. Raw validation records should be atta
 
 Open an issue with the exact disputed assumption and a proposed control, or submit a change that strengthens the official baseline. Official-service configuration can be supplied through `POWERSYNC_USER_VALUE_OFFICIAL_CONFIG_EXTRA`; MongoDB cache size can be fixed with `POWERSYNC_USER_VALUE_MONGO_CACHE_GB`.
 
-The comparison should use the strongest credible baseline. A faster official configuration is useful evidence, not an inconvenience.
+The comparison must use the strongest credible baseline. If official tuning improves performance, update the baseline and rerun the comparison.

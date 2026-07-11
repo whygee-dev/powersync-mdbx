@@ -2,7 +2,7 @@
 name = "powersync-mdbx"
 version = "0.1.0"
 edition = "2021"
-description = "Independent Rust and MDBX research prototype for PowerSync-style bucket materialization from PostgreSQL. Not affiliated with PowerSync or Journey Mobile, Inc."
+description = "Rust/MDBX implementation of PostgreSQL-to-PowerSync bucket replication for protocol and performance research."
 readme = "../../README.md"
 license = "Apache-2.0"
 publish = false

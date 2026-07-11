@@ -1,6 +1,6 @@
 # Protocol validation gate
 
-The benchmark's equivalence gate runs after processing readiness and before target shutdown.
+The benchmark's equivalence gate runs after all configured initial-boundary observers complete and before target shutdown.
 
 It verifies:
 
@@ -34,7 +34,7 @@ When `POWERSYNC_USER_VALUE_CHURN_GATE=1` is enabled, the benchmark additionally:
 6. validates each target's checkpoint count/checksum recurrence from its own emitted checksums.
 7. compares client-visible PUT/REMOVE operation digests across targets separately from checksum/subkey wire digests.
 
-Historical June 14, 2026 1m auth-perimeter parity-gated artifact summary (source revision unidentified):
+Historical 1m auth-perimeter parity-gated artifact summary (source revision unidentified):
 
 - artifact: `docs/artifacts/1m-auth-perimeter/parity-summary.json`.
 - repeats: 5 paired interleaved official/Rust runs.
@@ -55,9 +55,9 @@ Historical June 14, 2026 1m auth-perimeter parity-gated artifact summary (source
 
 Older subscription-parameter artifact: `docs/artifacts/1m-parity-gated/parity-summary.json`.
 
-These checks cover the selected buckets and fields only. They do not prove full
-protocol or rule-language compatibility, online rule-generation swaps,
-operator recovery after deleting all state, or general production suitability.
+These checks establish parity for the selected buckets and fields. They do not
+cover other protocol or rule-language forms, online rule-generation swaps, or
+operator recovery after deleting all state.
 
 Known parity boundary:
 

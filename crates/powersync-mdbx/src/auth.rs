@@ -11,6 +11,7 @@ use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::Sha256;
+use url::{Host, Url};
 
 const AUTH_REQUIRED_CODE: &str = "PSYNC_S2106";
 
@@ -579,17 +580,67 @@ fn parse_jwks(raw: &str) -> Result<Vec<AuthKey>, String> {
 }
 
 fn fetch_jwks(url: &str) -> Result<String, String> {
+    let url = validate_jwks_url(url)?;
+    let allow_loopback_http_redirects = jwks_url_is_loopback_http(&url);
     reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::custom(move |attempt| {
+            if attempt.previous().len() >= 10 {
+                return attempt.error("too many JWKS redirects");
+            }
+            if jwks_redirect_transport_allowed(
+                attempt.url(),
+                allow_loopback_http_redirects,
+            ) {
+                attempt.follow()
+            } else {
+                attempt.error(
+                    "JWKS redirects must use HTTPS unless the configured URL and redirect destination are both explicit loopback HTTP development URLs",
+                )
+            }
+        }))
         .build()
         .map_err(|error| format!("failed to build JWKS HTTP client: {error}"))?
-        .get(url)
+        .get(url.clone())
         .send()
         .map_err(|error| format!("failed to fetch JWKS URL {url}: {error}"))?
         .error_for_status()
         .map_err(|error| format!("JWKS URL {url} returned an error: {error}"))?
         .text()
         .map_err(|error| format!("failed to read JWKS URL {url}: {error}"))
+}
+
+fn validate_jwks_url(raw: &str) -> Result<Url, String> {
+    let url = Url::parse(raw).map_err(|error| format!("invalid JWKS URL {raw}: {error}"))?;
+    if url.host().is_none() {
+        return Err(format!("JWKS URL {raw} must include a host"));
+    }
+    if !jwks_url_transport_allowed(&url) {
+        return Err(format!(
+            "JWKS URL {raw} must use HTTPS; HTTP is permitted only for explicit loopback development URLs"
+        ));
+    }
+    Ok(url)
+}
+
+fn jwks_url_transport_allowed(url: &Url) -> bool {
+    url.scheme() == "https" || jwks_url_is_loopback_http(url)
+}
+
+fn jwks_url_is_loopback_http(url: &Url) -> bool {
+    if url.scheme() != "http" {
+        return false;
+    }
+    match url.host() {
+        Some(Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
+        Some(Host::Ipv4(address)) => address.is_loopback(),
+        Some(Host::Ipv6(address)) => address.is_loopback(),
+        None => false,
+    }
+}
+
+fn jwks_redirect_transport_allowed(url: &Url, allow_loopback_http: bool) -> bool {
+    url.scheme() == "https" || (allow_loopback_http && jwks_url_is_loopback_http(url))
 }
 
 fn select_hmac_key<'a>(keys: &'a [AuthKey], kid: Option<&str>) -> Option<&'a HmacKey> {
@@ -1065,5 +1116,76 @@ mod tests {
         .expect_err("unsupported JWKS should fail closed");
 
         assert!(error.contains("RSA jwk missing"));
+    }
+
+    #[test]
+    fn remote_jwks_requires_https_outside_loopback() {
+        for url in [
+            "http://example.com/jwks.json",
+            "http://10.0.0.1/jwks.json",
+            "http://localhost.example/jwks.json",
+            "ftp://example.com/jwks.json",
+        ] {
+            let error = validate_jwks_url(url).expect_err("insecure remote URL should fail");
+            assert!(
+                error.contains("must use HTTPS"),
+                "unexpected error: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn user_auth_rejects_insecure_remote_jwks_before_fetching() {
+        let error = UserAuthConfig::from_sources(
+            None,
+            None,
+            Some("http://example.com/jwks.json".to_owned()),
+            Vec::new(),
+            Vec::new(),
+        )
+        .expect_err("insecure remote JWKS configuration should fail at startup");
+
+        assert!(error.contains("must use HTTPS"));
+    }
+
+    #[test]
+    fn remote_jwks_accepts_https_and_explicit_loopback_http() {
+        for url in [
+            "https://example.com/jwks.json",
+            "http://localhost:8080/jwks.json",
+            "http://127.0.0.1:8080/jwks.json",
+            "http://127.255.255.254/jwks.json",
+            "http://[::1]:8080/jwks.json",
+        ] {
+            validate_jwks_url(url).expect("allowed JWKS URL should validate");
+        }
+    }
+
+    #[test]
+    fn remote_jwks_redirects_cannot_downgrade_remote_https_to_loopback_http() {
+        let remote_https = validate_jwks_url("https://example.com/jwks.json").unwrap();
+        let loopback_http = validate_jwks_url("http://127.0.0.1:8080/jwks.json").unwrap();
+        let other_loopback_http = validate_jwks_url("http://localhost:8081/jwks.json").unwrap();
+        let redirect_https = validate_jwks_url("https://keys.example.com/jwks.json").unwrap();
+
+        assert!(!jwks_redirect_transport_allowed(
+            &loopback_http,
+            jwks_url_is_loopback_http(&remote_https)
+        ));
+        assert!(jwks_redirect_transport_allowed(
+            &other_loopback_http,
+            jwks_url_is_loopback_http(&loopback_http)
+        ));
+        assert!(jwks_redirect_transport_allowed(
+            &redirect_https,
+            jwks_url_is_loopback_http(&remote_https)
+        ));
+    }
+
+    #[test]
+    fn remote_jwks_rejects_malformed_or_hostless_urls() {
+        for url in ["not a URL", "https://", "file:///tmp/jwks.json"] {
+            assert!(validate_jwks_url(url).is_err(), "{url} should fail");
+        }
     }
 }
