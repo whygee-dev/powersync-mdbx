@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  activeSyncRulesStateMatches,
   assertCursorProgression,
+  assertPublicationResourceEvidence,
   assertPublicRunPreflight,
   assertTargetProtocolParityAgainstOfficial,
   attachChurnExpectations,
@@ -11,13 +13,16 @@ import {
   buildInitialReadinessSpec,
   buildReadinessSubscriptionSpec,
   buildPublicationReadiness,
+  collectInitialReadinessBoundaries,
   compareDecimalCursors,
   createBenchmarkJwt,
+  churnMutationSql,
   defaultProtocolReadinessAttempts,
   effectiveProjectBucketSampleCount,
   extractMutationTargetLsn,
   churnEquivalenceRequestBody,
   initialEquivalenceRequestBody,
+  initialMaterializationDiagnosticsReached,
   initialReadinessSubject,
   isRetryableChurnProtocolConvergenceError,
   isRetryableProtocolReadinessError,
@@ -27,7 +32,9 @@ import {
   readinessAuthPerimeterRow,
   resetObservedBucketState,
   renderMarkdown,
-  summarizeSamples
+  sumAvailable,
+  summarizeSamples,
+  syncRulesStateMatches
 } from './user_value_benchmark.mjs';
 
 test('protocol readiness attempts cannot expire before the overall timeout', () => {
@@ -66,6 +73,18 @@ test('churn target LSN extraction ignores psql status output and requires one ma
     () => extractMutationTargetLsn('benchmark_target_lsn=0/1\nbenchmark_target_lsn=0/2\n'),
     /returned 2 target LSN markers/
   );
+});
+
+test('churn target LSN is captured after the mutation transaction commits', () => {
+  const row = {
+    id: 'task-1',
+    title: 'title',
+    summary: 'summary',
+    projectId: 'project-1',
+    organizationId: 'org-1'
+  };
+  const sql = churnMutationSql({ insertRows: [row], updateRows: [row], deleteRows: [row] });
+  assert.ok(sql.indexOf('COMMIT;') < sql.indexOf("SELECT 'benchmark_target_lsn='"));
 });
 
 test('project bucket sample reporting distinguishes requested and effective counts', () => {
@@ -151,6 +170,7 @@ test('public benchmark preflight accepts only a fully specified publication run'
     churnGateEnabled: true,
     churnGateMode: 'slot-lsn',
     rawValidationRecordsRetained: true,
+    resourceEvidenceEnabled: true,
     appendOnlyArtifacts: true,
     officialTuningReviewed: true,
     gitDirty: false
@@ -180,6 +200,7 @@ test('public benchmark preflight rejects a target resource budget mismatch', () 
     churnGateEnabled: true,
     churnGateMode: 'slot-lsn',
     rawValidationRecordsRetained: true,
+    resourceEvidenceEnabled: true,
     appendOnlyArtifacts: true,
     officialTuningReviewed: true,
     gitDirty: false
@@ -190,19 +211,166 @@ test('public benchmark preflight rejects a target resource budget mismatch', () 
   );
 });
 
+test('resource aggregation preserves unavailable counters instead of reporting zero', () => {
+  assert.equal(sumAvailable([null, undefined]), null);
+  assert.equal(sumAvailable([null, 1.25, 0.75]), 2);
+});
+
+test('publication resource evidence requires native Linux counters for every field', () => {
+  const window = {
+    components: {
+      service: {
+        status: 'captured',
+        source: 'linux-cgroup-v2',
+        cpuSeconds: 1,
+        cgroupLifetimePeakMemoryBytes: 2,
+        mainProcessLifetimePeakRssBytes: 3,
+        blockReadBytes: 4,
+        blockWriteBytes: 5,
+        networkRxBytes: 6,
+        networkTxBytes: 7
+      }
+    },
+    storage: { mdbx: { logicalBytes: 8, allocatedBytes: 9 } },
+    wal: { insertedBytes: 10 }
+  };
+  const complete = {
+    target: 'rust',
+    status: 'captured',
+    windows: Object.fromEntries(
+      ['initial', 'browser', 'equivalence', 'churn', 'total'].map((name) => [name, window])
+    )
+  };
+  assert.doesNotThrow(() => assertPublicationResourceEvidence(complete));
+  assert.throws(
+    () =>
+      assertPublicationResourceEvidence({
+        ...complete,
+        windows: { ...complete.windows, total: null }
+      }),
+    /total resource window was not captured/
+  );
+  assert.throws(
+    () =>
+      assertPublicationResourceEvidence({
+        ...complete,
+        windows: {
+          ...complete.windows,
+          initial: {
+            ...complete.windows.initial,
+            components: {
+              service: {
+                ...complete.windows.initial.components.service,
+                source: 'docker-stats-fallback',
+                cpuSeconds: null
+              }
+            }
+          }
+        }
+      }),
+    /not native Linux cgroup v2.*cpuSeconds is unavailable/s
+  );
+});
+
 test('publication readiness headlines the common protocol boundary and keeps diagnostics secondary', () => {
+  const targetLsn = '0/123';
   const readiness = buildPublicationReadiness({
     observableReady: {
       method: 'sync-protocol-checkpoint-complete',
       processingMs: 321,
       bucket: 'bucket-a'
     },
-    targetSpecificReady: { method: 'persisted-lsn', processingMs: 123 }
+    completeMaterialization: {
+      method: 'persisted-lsn',
+      completionBoundary: 'rust-persisted-initial-snapshot-lsn',
+      processingMs: 123,
+      targetLsn
+    },
+    sourceSlotPosition: {
+      method: 'replication-slot-confirmed-flush-lsn',
+      processingMs: 140,
+      targetLsn
+    },
+    targetLsn
   });
   assert.equal(readiness.method, 'sync-protocol-checkpoint-complete');
   assert.equal(readiness.processingMs, 321);
+  assert.equal(readiness.completeMaterialization.processingMs, 123);
+  assert.equal(readiness.sourceSlotPosition.processingMs, 140);
   assert.equal(readiness.targetSpecificDiagnostic.method, 'persisted-lsn');
   assert.equal(readiness.targetSpecificDiagnostic.processingMs, 123);
+  assert.throws(
+    () =>
+      buildPublicationReadiness({
+        observableReady: readiness.ready,
+        completeMaterialization: readiness.completeMaterialization,
+        sourceSlotPosition: { ...readiness.sourceSlotPosition, targetLsn: '0/124' },
+        targetLsn
+      }),
+    /must use the captured fixture LSN/
+  );
+});
+
+test('initial readiness observers start concurrently and retain all three boundaries', async () => {
+  const started = [];
+  let release;
+  const barrier = new Promise((resolve) => {
+    release = resolve;
+  });
+  const observer = (name, value) => async () => {
+    started.push(name);
+    await barrier;
+    return value;
+  };
+  const pending = collectInitialReadinessBoundaries({
+    observeProtocol: observer('protocol', { processingMs: 10 }),
+    observeCompleteMaterialization: observer('materialization', { processingMs: 20 }),
+    observeSlotPosition: observer('slot-position', { processingMs: 30 })
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(started, ['protocol', 'materialization', 'slot-position']);
+  release();
+  assert.deepEqual(await pending, {
+    observableReady: { processingMs: 10 },
+    completeMaterialization: { processingMs: 20 },
+    sourceSlotPosition: { processingMs: 30 }
+  });
+});
+
+test('complete materialization diagnostics require an explicit completion flag and source LSN', () => {
+  const complete = {
+    responseOk: true,
+    initialReplicationDone: true,
+    lsnReached: true,
+    versionReached: true
+  };
+  assert.equal(initialMaterializationDiagnosticsReached(complete), true);
+  assert.equal(
+    initialMaterializationDiagnosticsReached({ ...complete, initialReplicationDone: false }),
+    false
+  );
+  assert.equal(initialMaterializationDiagnosticsReached({ ...complete, lsnReached: false }), false);
+  assert.equal(initialMaterializationDiagnosticsReached({ ...complete, versionReached: false }), false);
+});
+
+test('publication active-rule validation rejects different rule content', () => {
+  assert.equal(syncRulesStateMatches({ content: 'bucket_definitions: []' }, 'bucket_definitions: []'), true);
+  assert.equal(
+    syncRulesStateMatches({ content: 'bucket_definitions: []' }, 'bucket_definitions:\n  tasks: {}'),
+    false
+  );
+  assert.equal(
+    activeSyncRulesStateMatches(
+      { version: 7, content: 'bucket_definitions: []', slotName: 'powersync_7' },
+      {
+        expectedVersion: 7,
+        expectedContent: 'bucket_definitions:\n  tasks: {}',
+        expectedSlotName: 'powersync_7',
+        requireExpectedContent: true
+      }
+    ),
+    false
+  );
 });
 
 test('common readiness spec is analytical and never scans initialTaskRows', () => {

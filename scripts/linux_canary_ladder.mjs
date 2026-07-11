@@ -173,8 +173,18 @@ function assertRunArtifacts(runDir, profile) {
     if (runs[0]?.equivalence?.status !== 'passed' || runs[0]?.churn?.status !== 'passed') {
       throw new Error(`${profile}/${target} did not pass initial equivalence and churn gates`);
     }
+    if (runs[0]?.resources?.status !== 'captured') {
+      throw new Error(`${profile}/${target} did not capture resource evidence`);
+    }
+    const rawRecords = walkFiles(path.join(runDir, target)).filter((file) => file.endsWith('.json.gz'));
+    for (const phase of ['initial', 'churn']) {
+      if (!rawRecords.some((file) => path.basename(file).startsWith(`${phase}-protocol-records.r1.`))) {
+        throw new Error(`${profile}/${target} is missing compressed ${phase} protocol records`);
+      }
+    }
   }
-  for (const gzipPath of walkFiles(runDir).filter((file) => file.endsWith('.gz'))) {
+  const gzipPaths = walkFiles(runDir).filter((file) => file.endsWith('.gz'));
+  for (const gzipPath of gzipPaths) {
     run('gzip', ['-t', gzipPath]);
   }
 }

@@ -1,61 +1,38 @@
 # 100k auth-perimeter artifacts
 
-Compact validation summaries from the paired official-vs-Rust `100k`
-processing-only run.
+Compact validation summary from a historical paired official-vs-Rust `100k`
+processing-only run. Read the [benchmark methodology](../../benchmark.md)
+before using any value from this directory.
 
-This run used an asymmetric topology: the official service and MongoDB ran in
-Docker Desktop's resource-limited Linux VM, while Rust and MDBX ran natively on
-the host. These files are retained for inspection, not as a fair product
-benchmark. The run predates the current correctness/security implementation and
-does not identify its Git commit. See `docs/benchmark.md` before quoting a result.
+The official service and MongoDB ran in Docker Desktop's resource-limited
+Linux VM; Rust and MDBX ran natively on the host. The run predates the
+current correctness and security implementation and does not identify its Git
+commit. It is retained for inspection, not as current-tree or product-level
+performance evidence.
 
 Run shape:
 
-- 100,102 source task rows.
-- default `tasks` bucket plus all 250 concrete
-  `tasks_by_auth_project(...)` buckets. The default bucket is included on this
-  profile because the full bucket is below the verifier's row cap.
-- bucket routing through `user_project_access` filtered by `auth.user_id()`
-  (251 access rows).
-- authz spoof probe: a no-access JWT user sending an authorized project id via
-  client-controlled parameters received zero checkpoint/data buckets on both
-  targets.
-- 10 inserts, 10 updates, and 10 deletes per routed project bucket after the
-  initial cursor; the validator observes 15,000 incremental PUT/REMOVE ops across
-  the default and routed buckets.
-- 1 unrecorded warmup pair and 5 measured paired repeats, with interleaved
-  target order recorded in `parity-summary.json`.
-- churn catch-up gated by each target's Postgres replication slot
-  `confirmed_flush_lsn` (`POWERSYNC_USER_VALUE_CHURN_GATE_MODE=slot-lsn`).
-- official baseline: `journeyapps/powersync-service:1.21.0` with the database,
-  MongoDB, authentication, and sync rules required by the harness, and no
-  additional performance tuning.
-- lifecycle asymmetry: the Rust replication slot was created before timing,
-  while the official service created its slot during measured startup. The
-  current harness provisions both publications before timing and creates both
-  slots after the measured start boundary.
+- 100,102 source task rows;
+- the default `tasks` bucket and 250 concrete
+  `tasks_by_auth_project(...)` buckets;
+- routing through `user_project_access` filtered by `auth.user_id()`;
+- an authorization-isolation probe in which a no-access user supplied an
+  authorized project id and received no checkpoint or data buckets;
+- 10 inserts, updates, and deletes per routed bucket after the initial cursor;
+- one unrecorded warmup pair and five measured pairs with interleaved order;
+- churn catch-up gated by PostgreSQL slot `confirmed_flush_lsn`;
+- official baseline `journeyapps/powersync-service:1.21.0` without additional
+  performance tuning.
 
-Files kept in-repo:
+The Rust slot was created before measured startup, while the official service
+created its slot during startup. The current harness creates both slots after
+the common start boundary.
 
-- `parity-summary.json`: compact aggregate parity, timing, host, and sample
-  summary derived by `scripts/export_artifacts.mjs`.
+[`parity-summary.json`](parity-summary.json) contains aggregate parity,
+timing, host, and sample data. Raw per-bucket observations and `results.json`
+were not retained, so the summary is not independently reproducible.
 
-The raw per-bucket validation JSON and raw `results.json` were not retained.
-Repeating the command recreates the configuration, not the exact historical
-run. This artifact predates Git/file hash and image-digest capture.
-
-The retained summary omits prose verdicts, winner labels, and interpolated p95
-comparison fields. Its p50 values are labeled as medians. The underlying
-median, delta, ratio, sample, and parity values were not changed.
-
-Host metadata was captured in `parity-summary.json`. The deployment topology is
-still asymmetric: official service + MongoDB run in Docker Desktop on macOS,
-while Rust runs as a native host process writing MDBX to local disk. Treat the
-ratios as this-machine, this-topology evidence.
-
-Parity note: initial counts, PUT digests, semantic digests, checkpoint counts,
-and checkpoint checksums are equal per bucket across targets. Churn PUT digests
-and REMOVE object digests are equal per bucket. Wire digests and churn
-checkpoint checksums are not expected to be byte-identical across targets
-because source-key/subkey encodings are implementation-specific, and REMOVE
-checksums hash the target-local subkey.
+Initial counts, PUT and semantic digests, checkpoint counts, and checkpoint
+checksums matched for every probed bucket. Churn PUT and REMOVE object digests
+also matched. Wire digests and churn checkpoint checksums are target-local
+because source-key and REMOVE subkey encodings differ.

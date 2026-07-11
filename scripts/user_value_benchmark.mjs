@@ -14,6 +14,11 @@ import { performance } from 'node:perf_hooks';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
+  captureResourceSnapshot,
+  diffResourceSnapshots
+} from './resource_evidence.mjs';
+
+import {
   buildBenchmarkFixture,
   TABLES,
   orgId,
@@ -315,6 +320,7 @@ try {
       rustUsePrebuiltBinary,
       rustCargoProfile,
       runtimeMode,
+      resourceEvidenceEnabled: symmetricDockerRuntime,
       targetResources: {
         cpus: targetCpuLimit,
         memory: targetMemoryLimit,
@@ -422,7 +428,7 @@ try {
         },
         endUserColdOpenReadiness:
           initialReadinessMode === 'sync-protocol'
-            ? 'shared /sync/stream checkpoint-complete proof; target-specific readiness retained as secondary diagnostics'
+            ? 'three concurrent boundaries: validated checkpoint completion for one routed /sync/stream subscription, target-specific complete materialization through the captured source LSN, and the replication slot confirmed-flush position for that LSN'
             : coldStartSyncProbeFallbackAllowed === true
             ? 'control-plane first; sync probe fallback allowed by env override'
             : 'control-plane only; no pre-measurement sync probe allowed'
@@ -518,15 +524,19 @@ function isDirectRun() {
 
 export {
   assertCursorProgression,
+  assertPublicationResourceEvidence,
   assertPublicRunPreflight,
   assertTargetProtocolParityAgainstOfficial,
   attachChurnExpectations,
+  activeSyncRulesStateMatches,
   buildComparisons,
   buildChurnBucketSpecs,
   buildInitialReadinessSpec,
+  collectInitialReadinessBoundaries,
   buildReadinessSubscriptionSpec,
   buildPublicationReadiness,
   createBenchmarkJwt,
+  churnMutationSql,
   churnEquivalenceRequestBody,
   collectEndUserMeasurementIssues,
   compareDecimalCursors,
@@ -537,6 +547,7 @@ export {
   normalizeDecimalCursor,
   initialEquivalenceRequestBody,
   initialReadinessSubject,
+  initialMaterializationDiagnosticsReached,
   isRetryableChurnProtocolConvergenceError,
   isRetryableProtocolReadinessError,
   observeRustChurnMetricsAfterPublicTiming,
@@ -544,7 +555,10 @@ export {
   readinessAuthPerimeterRow,
   resetObservedBucketState,
   renderMarkdown,
-  summarizeSamples
+  resourceEvidenceForSnapshots,
+  sumAvailable,
+  summarizeSamples,
+  syncRulesStateMatches
 };
 
 function positiveIntegerEnv(name, defaultValue) {
@@ -629,6 +643,7 @@ function runtimePublicRunPreflightInput() {
     churnGateEnabled,
     churnGateMode,
     rawValidationRecordsRetained: retainRawValidationRecords,
+    resourceEvidenceEnabled: symmetricDockerRuntime,
     appendOnlyArtifacts: !destructiveArtifactCleanupRequested,
     officialTuningReviewed,
     gitDirty: Boolean(tryCaptureVersion('git', ['status', '--porcelain']))
@@ -675,6 +690,9 @@ function assertPublicRunPreflight(input) {
   if (input.churnGateMode !== 'slot-lsn') issues.push('churn gate mode must be slot-lsn');
   if (input.rawValidationRecordsRetained !== true) {
     issues.push('compressed raw per-bucket validation records must be retained');
+  }
+  if (input.resourceEvidenceEnabled !== true) {
+    issues.push('CPU, memory, I/O, storage, network, and WAL resource evidence must be enabled');
   }
   if (input.appendOnlyArtifacts !== true) issues.push('artifact storage must be append-only for the matrix');
   if (input.officialTuningReviewed !== true) issues.push('official-service tuning must be reviewed by the PowerSync team');
@@ -790,6 +808,9 @@ function collectProvenance() {
       cargoLock: sha256FileIfPresent(path.join(repoRoot, 'Cargo.lock')),
       npmLock: sha256FileIfPresent(path.join(sdkDir, 'package-lock.json')),
       benchmarkHarness: sha256FileIfPresent(fileURLToPath(import.meta.url)),
+      resourceEvidenceCollector: sha256FileIfPresent(
+        path.join(repoRoot, 'scripts', 'resource_evidence.mjs')
+      ),
       benchmarkFixture: sha256FileIfPresent(
         path.join(sdkDir, 'src', 'benchmark-fixture.mjs')
       ),
@@ -876,6 +897,83 @@ function createTargetState(target) {
   };
 }
 
+function captureBenchmarkResourceSnapshot(targetLabel, walLsn) {
+  if (!symmetricDockerRuntime) {
+    return {
+      capturedAt: new Date().toISOString(),
+      walLsn,
+      components: {},
+      storage: {},
+      unavailable: 'resource evidence currently requires the symmetric-container runtime'
+    };
+  }
+  const components =
+    targetLabel === 'official'
+      ? [
+          { label: 'service', container: officialContainer },
+          { label: 'mongo', container: officialMongoContainer }
+        ]
+      : [{ label: 'service', container: rustContainer }];
+  const storagePaths =
+    targetLabel === 'official'
+      ? officialMongoDataDir == null
+        ? []
+        : [
+            { label: 'mongo-db', filePath: path.join(officialMongoDataDir, 'db') },
+            { label: 'mongo-config', filePath: path.join(officialMongoDataDir, 'configdb') }
+          ]
+      : [{ label: 'mdbx', filePath: path.join(benchmarkDir, 'rust-container-data') }];
+  return captureResourceSnapshot({ components, storagePaths, walLsn });
+}
+
+function resourceEvidenceForSnapshots({ target, repeat, runtimeMode: mode, snapshots }) {
+  const baseline = snapshots.baseline;
+  const final = snapshots.final;
+  const windows = {
+    initial:
+      baseline != null && snapshots.initialBoundaries != null
+        ? diffResourceSnapshots(baseline, snapshots.initialBoundaries)
+        : null,
+    browser:
+      snapshots.initialBoundaries != null && snapshots.browser != null
+        ? diffResourceSnapshots(snapshots.initialBoundaries, snapshots.browser)
+        : null,
+    equivalence:
+      snapshots.browser != null && snapshots.equivalence != null
+        ? diffResourceSnapshots(snapshots.browser, snapshots.equivalence)
+        : null,
+    churn:
+      snapshots.equivalence != null && snapshots.churn != null
+        ? diffResourceSnapshots(snapshots.equivalence, snapshots.churn)
+        : null,
+    total: baseline != null && final != null ? diffResourceSnapshots(baseline, final) : null
+  };
+  const captured =
+    baseline != null &&
+    final != null &&
+    baseline.unavailable == null &&
+    [windows.initial, windows.total].every(
+      (window) =>
+        window != null &&
+        Object.values(window.components ?? {}).every((component) => component.status === 'captured')
+    );
+  return {
+    schemaVersion: 1,
+    target,
+    repeat,
+    runtimeMode: mode,
+    status: captured ? 'captured' : 'unavailable',
+    limitations: [
+      'cgroup and process peak-memory fields are lifetime peaks; MongoDB includes provisioning before the measured window',
+      'component network counters are not summed because service-to-storage traffic appears in both namespaces',
+      'Docker stats fallback reports instantaneous CPU and current memory, not cumulative CPU or peak RSS',
+      'WAL bytes report the cluster-wide inserted WAL-position delta during the phase, not bytes decoded by a target'
+    ],
+    snapshots,
+    windows
+  };
+}
+
 async function runBenchmarksAcrossTargets(targetStates) {
   await runEndUserLaneAcrossTargets(targetStates);
   await runLifecycleLaneAcrossTargets(targetStates);
@@ -903,53 +1001,77 @@ async function runEndUserLaneOnce(target, targetDir, repeat, { warmup = false } 
   await prepareScenarioState(target.label, { syncRulesYaml: dashboardRulesYaml, cleanStorage: true });
   if (target.prepare) await target.prepare();
   const targetLsn = await captureTargetLsn({ underWriteLoad: false, operation: 'startup' });
-  const processingStartedAt = performance.now();
-  const { endpoint } = await startTargetAndWaitReady(target, dashboardRulesYaml);
-  const readiness = await waitForScenarioReady({
-    target,
-    endpoint,
-    expectedRules: dashboardRulesYaml,
-    targetLsn,
-    processingStartedAt,
-    allowSyncProbeFallback: coldStartSyncProbeFallbackAllowed,
-    publicationBoundary: initialReadinessMode === 'sync-protocol',
-    repeat
-  });
-
-  const resultPath = path.join(
+  const resourcePath = path.join(
     targetDir,
-    warmup
-      ? `end-user-warmup.r${repeat}.json`
-      : processingOnly
-        ? `end-user-processing-only.r${repeat}.json`
-        : `end-user-playwright.r${repeat}.json`
+    warmup ? `resource-evidence-warmup.r${repeat}.json` : `resource-evidence.r${repeat}.json`
   );
-  const browserResult =
-    processingOnly || warmup
-      ? {
-          processingOnly: true,
-          scenarios: {}
-        }
-      : await runPlaywrightAsync({
-        targetLabel: compactBrowserLabel(`${target.label}-user-r${repeat}`),
-        endpoint,
-        resultPath,
-        scenarios: ['coldInitialSync', 'warmReconnect', 'insertPropagation', 'updatePropagation', 'deletePropagation'],
-        iterations: 1
-      });
-  if (processingOnly || warmup) {
-    fs.writeFileSync(resultPath, JSON.stringify(browserResult, null, 2));
+  const resourceSnapshots = {};
+  if (!warmup) {
+    resourceSnapshots.baseline = captureBenchmarkResourceSnapshot(target.label, queryCurrentInsertLsn());
   }
-  const diagnostics = await fetchTargetMetrics(endpoint).catch((error) => ({
-    ok: false,
-    error: compactErrorMessage(error.message)
-  }));
-  const equivalence =
-    equivalenceGateEnabled && !warmup
-      ? await runBucketProtocolEquivalenceGate({ target, endpoint, repeat, targetDir })
-      : null;
-  let churn = null;
+  const processingStartedAt = performance.now();
+  let endpoint = null;
+  let equivalence = null;
+  const runResult = {};
+  let publicationResourceError = null;
   try {
+    ({ endpoint } = await startTargetAndWaitReady(target, dashboardRulesYaml, publicRun ? 1 : 2));
+    const readiness = await waitForScenarioReady({
+      target,
+      endpoint,
+      expectedRules: dashboardRulesYaml,
+      targetLsn,
+      processingStartedAt,
+      allowSyncProbeFallback: coldStartSyncProbeFallbackAllowed,
+      publicationBoundary: initialReadinessMode === 'sync-protocol',
+      repeat
+    });
+    if (!warmup) {
+      resourceSnapshots.initialBoundaries = captureBenchmarkResourceSnapshot(
+        target.label,
+        queryCurrentInsertLsn()
+      );
+    }
+
+    const resultPath = path.join(
+      targetDir,
+      warmup
+        ? `end-user-warmup.r${repeat}.json`
+        : processingOnly
+          ? `end-user-processing-only.r${repeat}.json`
+          : `end-user-playwright.r${repeat}.json`
+    );
+    const browserResult =
+      processingOnly || warmup
+        ? {
+            processingOnly: true,
+            scenarios: {}
+          }
+        : await runPlaywrightAsync({
+          targetLabel: compactBrowserLabel(`${target.label}-user-r${repeat}`),
+          endpoint,
+          resultPath,
+          scenarios: ['coldInitialSync', 'warmReconnect', 'insertPropagation', 'updatePropagation', 'deletePropagation'],
+          iterations: 1
+        });
+    if (processingOnly || warmup) {
+      fs.writeFileSync(resultPath, JSON.stringify(browserResult, null, 2));
+    }
+    if (!warmup) {
+      resourceSnapshots.browser = captureBenchmarkResourceSnapshot(target.label, queryCurrentInsertLsn());
+    }
+    const diagnostics = await fetchTargetMetrics(endpoint).catch((error) => ({
+      ok: false,
+      error: compactErrorMessage(error.message)
+    }));
+    equivalence =
+      equivalenceGateEnabled && !warmup
+        ? await runBucketProtocolEquivalenceGate({ target, endpoint, repeat, targetDir })
+        : null;
+    if (!warmup) {
+      resourceSnapshots.equivalence = captureBenchmarkResourceSnapshot(target.label, queryCurrentInsertLsn());
+    }
+    let churn = null;
     if (churnGateEnabled && !warmup) {
       churn = await runChurnProtocolGate({
         target,
@@ -960,20 +1082,71 @@ async function runEndUserLaneOnce(target, targetDir, repeat, { warmup = false } 
         initialEquivalence: equivalence
       });
     }
+    if (!warmup) {
+      resourceSnapshots.churn = captureBenchmarkResourceSnapshot(target.label, queryCurrentInsertLsn());
+    }
+    Object.assign(runResult, {
+      repeat,
+      readiness,
+      diagnostics,
+      equivalence,
+      churn,
+      artifactPath: resultPath,
+      raw: browserResult
+    });
+    return runResult;
   } finally {
     if (equivalence?.verificationSpecs) delete equivalence.verificationSpecs;
+    let stopError = null;
+    try {
+      if (!warmup) {
+        let resourceEvidence = null;
+        try {
+          resourceSnapshots.final = captureBenchmarkResourceSnapshot(target.label, queryCurrentInsertLsn());
+          resourceEvidence = resourceEvidenceForSnapshots({
+            target: target.label,
+            repeat,
+            runtimeMode,
+            snapshots: resourceSnapshots
+          });
+          if (publicRun) {
+            assertPublicationResourceEvidence(resourceEvidence);
+            resourceEvidence.publicationValidation = { status: 'passed' };
+          }
+          fs.writeFileSync(resourcePath, `${JSON.stringify(resourceEvidence, null, 2)}\n`);
+          runResult.resources = {
+            status: resourceEvidence.status,
+            artifactPath: resourcePath,
+            initial: resourceEvidence.windows.initial,
+            total: resourceEvidence.windows.total
+          };
+        } catch (error) {
+          const resourceError = compactErrorMessage(error.message);
+          const failureArtifact =
+            resourceEvidence == null
+              ? { schemaVersion: 1, target: target.label, repeat, status: 'failed', error: resourceError }
+              : {
+                  ...resourceEvidence,
+                  publicationValidation: { status: 'failed', error: resourceError }
+                };
+          fs.writeFileSync(resourcePath, `${JSON.stringify(failureArtifact, null, 2)}\n`);
+          runResult.resources = { status: 'failed', artifactPath: resourcePath, error: resourceError };
+          if (publicRun) publicationResourceError = error;
+        }
+      }
+    } finally {
+      try {
+        await target.stop();
+      } catch (error) {
+        stopError = error;
+      }
+    }
+    if (publicationResourceError != null && stopError != null) {
+      throw new AggregateError([publicationResourceError, stopError], 'resource validation and target teardown failed');
+    }
+    if (publicationResourceError != null) throw publicationResourceError;
+    if (stopError != null) throw stopError;
   }
-
-  await target.stop();
-  return {
-    repeat,
-    readiness,
-    diagnostics,
-    equivalence,
-    churn,
-    artifactPath: resultPath,
-    raw: browserResult
-  };
 }
 
 async function runLifecycleLaneAcrossTargets(targetStates) {
@@ -1038,7 +1211,7 @@ function finalizeTargetState(state) {
       lifecycleRepeats,
       coldOpenReadiness:
         initialReadinessMode === 'sync-protocol'
-          ? 'shared /sync/stream checkpoint-complete proof; target-specific readiness is secondary'
+          ? 'validated checkpoint completion for one routed subscription, target-specific complete materialization, and replication-slot confirmed-flush position are recorded separately'
           : coldStartSyncProbeFallbackAllowed === true
           ? 'control-plane first with opt-in sync probe fallback'
           : 'control-plane only; no pre-measurement sync probe'
@@ -1073,6 +1246,7 @@ function summarizeEndUserRuns(runs, targetDir) {
       diagnostics: run.diagnostics,
       equivalence: run.equivalence,
       churn: run.churn,
+      resources: run.resources,
       artifactPath: run.artifactPath
     })),
     raw: {
@@ -1080,6 +1254,7 @@ function summarizeEndUserRuns(runs, targetDir) {
     },
     summary: {
       processing: summarizeReadinessRuns(runs),
+      resources: summarizeResourceRuns(runs),
       coldOpen: summarizeSamples(coldInitialSyncSamples, ['connectedMs', 'firstSyncMs', 'steadyMs']),
       warmReconnect: summarizeSamples(warmReconnectSamples, ['connectedMs', 'steadyMs']),
       liveInsert: summarizeSamples(insertPropagationSamples, ['visibleMs']),
@@ -3380,8 +3555,8 @@ SET
 WHERE id IN (${updateIds.map((id) => `'${escapeLiteral(id)}'`).join(', ')});
 DELETE FROM ${TABLES.tasks}
 WHERE id IN (${deleteIds.map((id) => `'${escapeLiteral(id)}'`).join(', ')});
-SELECT 'benchmark_target_lsn=' || pg_current_wal_lsn()::text;
 COMMIT;
+SELECT 'benchmark_target_lsn=' || pg_current_wal_lsn()::text;
 `.trim();
 }
 
@@ -3894,25 +4069,28 @@ async function waitForScenarioReady({
   repeat = 0
 }) {
   if (publicationBoundary) {
-    const observableReady = await waitForProtocolObservableInitialReadiness({
-      endpoint,
-      repeat,
-      processingStartedAt
+    const boundaries = await collectInitialReadinessBoundaries({
+      observeProtocol: () =>
+        waitForProtocolObservableInitialReadiness({ endpoint, repeat, processingStartedAt }),
+      observeCompleteMaterialization: () =>
+        waitForTargetSpecificScenarioReady({
+          target,
+          endpoint,
+          expectedRules,
+          targetLsn,
+          processingStartedAt,
+          allowSyncProbeFallback: false,
+          requireActiveState: true,
+          requireExpectedRules: true
+        }),
+      observeSlotPosition: () =>
+        waitForInitialSlotPosition({ target, targetLsn, processingStartedAt })
     });
-    const targetSpecificReady = await waitForTargetSpecificScenarioReady({
-      target,
-      endpoint,
-      expectedRules,
-      targetLsn,
-      processingStartedAt,
-      allowSyncProbeFallback: false
-    }).catch((error) => ({
-      method: 'unavailable',
-      error: compactErrorMessage(error.message)
-    }));
     return buildPublicationReadiness({
-      observableReady,
-      targetSpecificReady
+      observableReady: boundaries.observableReady,
+      completeMaterialization: boundaries.completeMaterialization,
+      sourceSlotPosition: boundaries.sourceSlotPosition,
+      targetLsn
     });
   }
 
@@ -3926,13 +4104,43 @@ async function waitForScenarioReady({
   });
 }
 
+async function collectInitialReadinessBoundaries({
+  observeProtocol,
+  observeCompleteMaterialization,
+  observeSlotPosition
+}) {
+  const observations = [
+    ['protocol readiness', settleOutcome(Promise.resolve().then(observeProtocol))],
+    ['complete materialization', settleOutcome(Promise.resolve().then(observeCompleteMaterialization))],
+    ['replication-slot position', settleOutcome(Promise.resolve().then(observeSlotPosition))]
+  ];
+  const outcomes = await Promise.all(observations.map(([, promise]) => promise));
+  const failures = outcomes
+    .map((outcome, index) => ({ outcome, label: observations[index][0] }))
+    .filter(({ outcome }) => !outcome.ok);
+  if (failures.length > 0) {
+    throw new Error(
+      `initial readiness boundary failed: ${failures
+        .map(({ label, outcome }) => `${label}: ${compactErrorMessage(outcome.error?.message)}`)
+        .join('; ')}`
+    );
+  }
+  return {
+    observableReady: outcomes[0].value,
+    completeMaterialization: outcomes[1].value,
+    sourceSlotPosition: outcomes[2].value
+  };
+}
+
 async function waitForTargetSpecificScenarioReady({
   target,
   endpoint,
   expectedRules,
   targetLsn,
   processingStartedAt,
-  allowSyncProbeFallback
+  allowSyncProbeFallback,
+  requireActiveState = false,
+  requireExpectedRules = false
 }) {
   let activeState = null;
   try {
@@ -3940,9 +4148,11 @@ async function waitForTargetSpecificScenarioReady({
       expectedVersion: null,
       expectedContent: expectedRules,
       expectedSlotName: null,
+      requireExpectedContent: requireExpectedRules,
       timeoutMs
     });
   } catch (error) {
+    if (requireActiveState) throw error;
     log(`sync-rules state fallback for ${target.label}: ${error.message}`);
   }
 
@@ -3958,8 +4168,10 @@ async function waitForTargetSpecificScenarioReady({
         log(`startup ${target.label}: active + persisted-LSN ready`);
         return {
           method: 'persisted-lsn',
+          completionBoundary: 'rust-persisted-initial-snapshot-lsn',
           activeVersion: activeState?.version ?? null,
           processingMs: processingStartedAt == null ? readyState.elapsedMs : round(performance.now() - processingStartedAt),
+          targetLsn,
           ready: readyState
         };
       }
@@ -3973,8 +4185,10 @@ async function waitForTargetSpecificScenarioReady({
       log(`startup ${target.label}: active + ready`);
       return {
         method: 'control-plane',
+        completionBoundary: 'official-diagnostics-initial-replication-lsn',
         activeVersion: activeState?.version ?? null,
         processingMs: processingStartedAt == null ? readyState.elapsedMs : round(performance.now() - processingStartedAt),
+        targetLsn,
         ready: readyState
       };
     } catch (error) {
@@ -4057,16 +4271,44 @@ function isRetryableProtocolReadinessError(error) {
   );
 }
 
-function buildPublicationReadiness({ observableReady, targetSpecificReady }) {
+function buildPublicationReadiness({ observableReady, completeMaterialization, sourceSlotPosition, targetLsn }) {
   if (observableReady?.method !== 'sync-protocol-checkpoint-complete') {
     throw new Error('publication readiness requires a completed sync-protocol checkpoint boundary');
+  }
+  if (!Number.isFinite(observableReady?.processingMs)) {
+    throw new Error('publication readiness requires finite protocol timing');
+  }
+  const recognizedCompletionBoundaries = new Set([
+    'official-diagnostics-initial-replication-lsn',
+    'rust-persisted-initial-snapshot-lsn'
+  ]);
+  if (!recognizedCompletionBoundaries.has(completeMaterialization?.completionBoundary)) {
+    throw new Error('publication readiness requires a recognized complete-materialization boundary');
+  }
+  if (!Number.isFinite(completeMaterialization?.processingMs)) {
+    throw new Error('publication readiness requires finite complete-materialization timing');
+  }
+  if (sourceSlotPosition?.method !== 'replication-slot-confirmed-flush-lsn') {
+    throw new Error('publication readiness requires a replication-slot confirmed-flush position');
+  }
+  if (!Number.isFinite(sourceSlotPosition?.processingMs)) {
+    throw new Error('publication readiness requires finite replication-slot timing');
+  }
+  if (
+    typeof targetLsn !== 'string' ||
+    completeMaterialization.targetLsn !== targetLsn ||
+    sourceSlotPosition.targetLsn !== targetLsn
+  ) {
+    throw new Error('publication readiness boundaries must use the captured fixture LSN');
   }
   return {
     method: observableReady.method,
     processingMs: observableReady.processingMs,
-    activeVersion: targetSpecificReady?.activeVersion ?? null,
+    activeVersion: completeMaterialization?.activeVersion ?? null,
     ready: observableReady,
-    targetSpecificDiagnostic: targetSpecificReady ?? null
+    completeMaterialization,
+    sourceSlotPosition,
+    targetSpecificDiagnostic: completeMaterialization
   };
 }
 
@@ -4444,9 +4686,35 @@ function normalizeSyncRulesContent(content) {
     .trim();
 }
 
+function activeSyncRulesStateMatches(
+  state,
+  { expectedVersion, expectedContent, expectedSlotName, requireExpectedContent = false }
+) {
+  const versionMatches =
+    Number.isFinite(expectedVersion) &&
+    (Number.isFinite(state?.version) ? state.version >= expectedVersion : false);
+  const slotMatches =
+    typeof expectedSlotName === 'string' &&
+    expectedSlotName.length > 0 &&
+    state?.slotName === expectedSlotName;
+  const contentMatches = syncRulesStateMatches(state, expectedContent);
+  return requireExpectedContent
+    ? contentMatches
+    : versionMatches ||
+        slotMatches ||
+        ((!Number.isFinite(expectedVersion) || !Number.isFinite(state?.version)) &&
+          (!expectedSlotName || slotMatches || contentMatches));
+}
+
 async function waitForActiveState(
   endpoint,
-  { expectedVersion, expectedContent, expectedSlotName, timeoutMs: timeoutMsValue }
+  {
+    expectedVersion,
+    expectedContent,
+    expectedSlotName,
+    requireExpectedContent = false,
+    timeoutMs: timeoutMsValue
+  }
 ) {
   const startedAt = performance.now();
   const deadline = Date.now() + timeoutMsValue;
@@ -4455,19 +4723,12 @@ async function waitForActiveState(
   while (Date.now() < deadline) {
     const state = await fetchCurrentState(endpoint).catch(() => null);
     lastState = state;
-    const versionMatches =
-      Number.isFinite(expectedVersion) &&
-      (Number.isFinite(state?.version) ? state.version >= expectedVersion : false);
-    const slotMatches =
-      typeof expectedSlotName === 'string' &&
-      expectedSlotName.length > 0 &&
-      state?.slotName === expectedSlotName;
-    const contentMatches = syncRulesStateMatches(state, expectedContent);
-    const stateMatches =
-      versionMatches ||
-      slotMatches ||
-      ((!Number.isFinite(expectedVersion) || !Number.isFinite(state?.version)) &&
-        (!expectedSlotName || slotMatches || contentMatches));
+    const stateMatches = activeSyncRulesStateMatches(state, {
+      expectedVersion,
+      expectedContent,
+      expectedSlotName,
+      requireExpectedContent
+    });
     if (stateMatches) {
       return {
         version: state?.version ?? null,
@@ -4531,6 +4792,37 @@ async function waitForReplicationSlotToReach({ slotName, targetLsn, timeoutMs: t
   );
 }
 
+async function waitForInitialSlotPosition({ target, targetLsn, processingStartedAt }) {
+  const startedAt = performance.now();
+  const deadline = Date.now() + timeoutMs;
+  let lastState = null;
+  let resolvedSlotName = target.label === 'rust' ? rustSlot : null;
+  while (Date.now() < deadline) {
+    if (resolvedSlotName == null) resolvedSlotName = await resolveOfficialReplicationSlotNameAsync();
+    const slotState = await queryReplicationSlotStateAsync(resolvedSlotName);
+    lastState = { slotName: resolvedSlotName, ...slotState };
+    const comparison = compareLsn(slotState?.confirmedFlushLsn, targetLsn);
+    if (comparison != null && comparison >= 0) {
+      return {
+        method: 'replication-slot-confirmed-flush-lsn',
+        processingMs:
+          processingStartedAt == null
+            ? round(performance.now() - startedAt)
+            : round(performance.now() - processingStartedAt),
+        targetLsn,
+        slotName: resolvedSlotName,
+        confirmed_flush_lsn: slotState.confirmedFlushLsn,
+        restart_lsn: slotState.restartLsn,
+        active: slotState.active
+      };
+    }
+    await delay(250);
+  }
+  throw new Error(
+    `timed out waiting for ${target.label} replication-slot confirmed_flush_lsn to reach ${targetLsn}; last=${JSON.stringify(lastState)}`
+  );
+}
+
 async function waitForRustMetricsToReach({ endpoint, targetLsn, timeoutMs: timeoutMsValue, pollIntervalMs }) {
   const startedAt = performance.now();
   const deadline = Date.now() + timeoutMsValue;
@@ -4546,7 +4838,7 @@ async function waitForRustMetricsToReach({ endpoint, targetLsn, timeoutMs: timeo
       last_persisted_end_lsn: lastPersistedEndLsn,
       metrics: response.body?.metrics ?? null
     };
-    if (targetLsn == null || (comparison != null && comparison >= 0)) {
+    if (response.ok && (targetLsn == null || (comparison != null && comparison >= 0))) {
       return {
         method: 'persisted-lsn',
         last_persisted_end_lsn: lastPersistedEndLsn,
@@ -4671,15 +4963,16 @@ async function fetchDiagnosticsState({ endpoint, targetLsn, expectedVersion }) {
   const connection = extractDiagnosticsConnection(diagnostics);
   const version = extractLifecycleVersion(diagnostics);
   const comparison = compareLsn(connection?.last_lsn, targetLsn);
-  const initialReplicationDone = connection?.initial_replication_done !== false;
+  const initialReplicationDone = connection?.initial_replication_done === true;
   const lsnReached = targetLsn == null || (comparison != null && comparison >= 0);
   const versionReached = expectedVersion == null || version == null || version >= expectedVersion;
   return {
-    reached:
-      response.ok &&
-      versionReached &&
-      initialReplicationDone &&
+    reached: initialMaterializationDiagnosticsReached({
+      responseOk: response.ok,
+      initialReplicationDone,
       lsnReached,
+      versionReached
+    }),
     version,
     last_lsn: connection?.last_lsn ?? null,
     last_checkpoint: connection?.last_checkpoint ?? null,
@@ -4687,6 +4980,15 @@ async function fetchDiagnosticsState({ endpoint, targetLsn, expectedVersion }) {
     responseStatus: response.statusCode,
     body: diagnostics
   };
+}
+
+function initialMaterializationDiagnosticsReached({
+  responseOk,
+  initialReplicationDone,
+  lsnReached,
+  versionReached
+}) {
+  return responseOk === true && initialReplicationDone === true && lsnReached === true && versionReached === true;
 }
 
 function normalizeDiagnosticsPayload(body) {
@@ -4798,6 +5100,10 @@ function queryCurrentFlushLsn() {
   return runSqlQuery('SELECT pg_current_wal_flush_lsn()');
 }
 
+function queryCurrentInsertLsn() {
+  return runSqlQuery('SELECT pg_current_wal_insert_lsn()');
+}
+
 async function settleOutcome(promise) {
   try {
     return { ok: true, value: await promise };
@@ -4831,6 +5137,8 @@ function buildComparisons(targets, config) {
         candidate.endUser.summary,
         [
           'processing.processingMs',
+          'processing.completeMaterializationMs',
+          'processing.sourceSlotPositionMs',
           'coldOpen.firstSyncMs',
           'coldOpen.steadyMs',
           'warmReconnect.steadyMs',
@@ -5132,11 +5440,125 @@ function summarizeReadinessRuns(runs) {
   return summarizeSamples(
     runs
       .map((run) => ({
-        processingMs: run.readiness?.processingMs ?? null
+        processingMs: run.readiness?.processingMs ?? null,
+        completeMaterializationMs: run.readiness?.completeMaterialization?.processingMs ?? null,
+        sourceSlotPositionMs: run.readiness?.sourceSlotPosition?.processingMs ?? null
       }))
       .filter((sample) => sample.processingMs != null),
-    ['processingMs']
+    ['processingMs', 'completeMaterializationMs', 'sourceSlotPositionMs']
   );
+}
+
+function summarizeResourceRuns(runs) {
+  const capturedRuns = runs
+    .filter((run) => run.resources?.status === 'captured' && run.resources?.initial != null);
+  const samples = capturedRuns
+    .map((run) => {
+      const initial = run.resources?.initial;
+      const components = Object.values(initial.components ?? {});
+      return {
+        cpuSeconds: sumAvailable(components.map((component) => component.cpuSeconds)),
+        blockReadBytes: sumAvailable(components.map((component) => component.blockReadBytes)),
+        blockWriteBytes: sumAvailable(components.map((component) => component.blockWriteBytes)),
+        storageAllocatedBytes: sumAvailable(
+          Object.values(initial.storage ?? {}).map((entry) => entry.allocatedBytes)
+        ),
+        walInsertedBytes: initial.wal?.insertedBytes ?? null
+      };
+    });
+  const summary = summarizeSamples(samples, [
+    'cpuSeconds',
+    'blockReadBytes',
+    'blockWriteBytes',
+    'storageAllocatedBytes',
+    'walInsertedBytes'
+  ]);
+  const componentLabels = new Set(
+    capturedRuns.flatMap((run) => Object.keys(run.resources.initial.components ?? {}))
+  );
+  summary.components = Object.fromEntries(
+    [...componentLabels].map((label) => [
+      label,
+      summarizeSamples(
+        capturedRuns.map((run) => run.resources.initial.components?.[label] ?? {}),
+        [
+          'cgroupLifetimePeakMemoryBytes',
+          'mainProcessLifetimePeakRssBytes',
+          'networkRxBytes',
+          'networkTxBytes'
+        ]
+      )
+    ])
+  );
+  const storageLabels = new Set(
+    capturedRuns.flatMap((run) => Object.keys(run.resources.initial.storage ?? {}))
+  );
+  summary.storage = Object.fromEntries(
+    [...storageLabels].map((label) => [
+      label,
+      summarizeSamples(
+        capturedRuns.map((run) => run.resources.initial.storage?.[label] ?? {}),
+        ['logicalBytes', 'allocatedBytes']
+      )
+    ])
+  );
+  return summary;
+}
+
+function sumAvailable(values) {
+  const available = values
+    .filter((value) => value != null)
+    .map(Number)
+    .filter(Number.isFinite);
+  return available.length === 0 ? null : available.reduce((sum, value) => sum + value, 0);
+}
+
+function assertPublicationResourceEvidence(evidence) {
+  const issues = [];
+  if (evidence?.status !== 'captured') issues.push('resource snapshots were not captured');
+  const expectedComponents = evidence?.target === 'official' ? ['service', 'mongo'] : ['service'];
+  const expectedStorage = evidence?.target === 'official' ? ['mongo-db', 'mongo-config'] : ['mdbx'];
+  for (const windowName of ['initial', 'browser', 'equivalence', 'churn', 'total']) {
+    const window = evidence?.windows?.[windowName];
+    if (window == null) {
+      issues.push(`${windowName} resource window was not captured`);
+      continue;
+    }
+    const components = Object.entries(window.components ?? {});
+    for (const label of expectedComponents) {
+      if (!Object.hasOwn(window.components ?? {}, label)) issues.push(`${windowName}.${label} is missing`);
+    }
+    for (const [label, component] of components) {
+      if (component.status !== 'captured') issues.push(`${windowName}.${label} counters were not captured`);
+      if (component.source !== 'linux-cgroup-v2') {
+        issues.push(`${windowName}.${label} counters came from ${component.source ?? 'an unknown source'}, not native Linux cgroup v2`);
+      }
+      for (const field of [
+        'cpuSeconds',
+        'cgroupLifetimePeakMemoryBytes',
+        'mainProcessLifetimePeakRssBytes',
+        'blockReadBytes',
+        'blockWriteBytes',
+        'networkRxBytes',
+        'networkTxBytes'
+      ]) {
+        if (!Number.isFinite(component[field])) issues.push(`${windowName}.${label}.${field} is unavailable`);
+      }
+    }
+    const storage = Object.entries(window.storage ?? {});
+    for (const label of expectedStorage) {
+      if (!Object.hasOwn(window.storage ?? {}, label)) issues.push(`${windowName}.${label} storage is missing`);
+    }
+    for (const [label, entry] of storage) {
+      for (const field of ['logicalBytes', 'allocatedBytes']) {
+        if (!Number.isFinite(entry[field])) issues.push(`${windowName}.${label}.${field} is unavailable`);
+      }
+    }
+    if (!Number.isFinite(window.wal?.insertedBytes)) issues.push(`${windowName} inserted WAL-position delta is unavailable`);
+  }
+  if (issues.length > 0) {
+    throw new Error(`public benchmark resource evidence failed:\n- ${issues.join('\n- ')}`);
+  }
 }
 
 function percentile(values, quantile) {
@@ -5237,10 +5659,12 @@ function renderMarkdown({ results, comparisons }) {
     lines.push(renderScenarioTable(target.endUser.summary, {
       processing: [[
         results.config?.initialReadinessMode === 'sync-protocol'
-          ? 'Target startup to protocol-observable readiness'
+          ? 'Target startup to validated checkpoint completion for one routed subscription'
           : 'Target startup to target-specific readiness',
         'processingMs'
-      ]],
+      ],
+      ['Target startup to target-specific complete materialization', 'completeMaterializationMs'],
+      ['Target startup to replication-slot confirmed-flush position', 'sourceSlotPositionMs']],
       coldOpen: [
         ['Open to first data', 'firstSyncMs'],
         ['Open to usable screen', 'steadyMs']
@@ -5257,6 +5681,10 @@ function renderMarkdown({ results, comparisons }) {
         lines.push(`- ${issue}`);
       }
     }
+    lines.push('');
+    lines.push('### Resources through all initial gates');
+    lines.push('');
+    lines.push(renderResourceSummaryTable(target.endUser.summary?.resources));
     lines.push('');
     lines.push('### Deploy-to-user recovery');
     lines.push('');
@@ -5310,6 +5738,42 @@ function renderScenarioTable(summary, scenarioMap) {
     for (const [label, metricKey] of metrics) {
       const metric = scenario?.[metricKey];
       lines.push(`| ${label} | ${formatMs(metric?.p50)} | ${formatMs(metric?.p95)} | ${metric?.count ?? 0} |`);
+    }
+  }
+  return lines.join('\n');
+}
+
+function renderResourceSummaryTable(summary) {
+  const rows = [
+    ['CPU time', 'cpuSeconds', formatSeconds],
+    ['Block reads', 'blockReadBytes', formatBytes],
+    ['Block writes', 'blockWriteBytes', formatBytes],
+    ['Allocated storage growth', 'storageAllocatedBytes', formatBytes],
+    ['Cluster-wide inserted WAL-position delta', 'walInsertedBytes', formatBytes]
+  ];
+  const lines = ['| Metric | p50 | p95 | Sample count |', '| --- | ---: | ---: | ---: |'];
+  for (const [label, key, format] of rows) {
+    const metric = summary?.[key];
+    lines.push(`| ${label} | ${format(metric?.p50)} | ${format(metric?.p95)} | ${metric?.count ?? 0} |`);
+  }
+  for (const [label, component] of Object.entries(summary?.components ?? {})) {
+    for (const [metricLabel, key] of [
+      ['cgroup lifetime peak memory', 'cgroupLifetimePeakMemoryBytes'],
+      ['container init-process lifetime peak RSS', 'mainProcessLifetimePeakRssBytes'],
+      ['network received', 'networkRxBytes'],
+      ['network transmitted', 'networkTxBytes']
+    ]) {
+      const metric = component?.[key];
+      lines.push(`| ${label}: ${metricLabel} | ${formatBytes(metric?.p50)} | ${formatBytes(metric?.p95)} | ${metric?.count ?? 0} |`);
+    }
+  }
+  for (const [label, storage] of Object.entries(summary?.storage ?? {})) {
+    for (const [metricLabel, key] of [
+      ['logical growth', 'logicalBytes'],
+      ['allocated growth', 'allocatedBytes']
+    ]) {
+      const metric = storage?.[key];
+      lines.push(`| ${label}: ${metricLabel} | ${formatBytes(metric?.p50)} | ${formatBytes(metric?.p95)} | ${metric?.count ?? 0} |`);
     }
   }
   return lines.join('\n');
@@ -5435,6 +5899,13 @@ function resolveOfficialReplicationSlotName() {
   return slotName || null;
 }
 
+async function resolveOfficialReplicationSlotNameAsync() {
+  const slotName = await runSqlQueryAsync(
+    `SELECT slot_name FROM pg_replication_slots WHERE slot_name LIKE '${escapeLiteral(officialSlotPrefix)}%' ORDER BY slot_name LIMIT 1`
+  );
+  return slotName || null;
+}
+
 function queryReplicationSlotState(slotName) {
   if (typeof slotName !== 'string' || slotName.length === 0) return null;
   const result = runSqlCommand(
@@ -5451,6 +5922,53 @@ function queryReplicationSlotState(slotName) {
     restartLsn: restartLsnRaw || null,
     active: activeRaw === '1'
   };
+}
+
+async function queryReplicationSlotStateAsync(slotName) {
+  if (typeof slotName !== 'string' || slotName.length === 0) return null;
+  const result = await runSqlCommandAsync([
+    '-AtF',
+    '\t',
+    '-c',
+    `SELECT COALESCE(confirmed_flush_lsn::text, ''), COALESCE(restart_lsn::text, ''), CASE WHEN active THEN '1' ELSE '0' END FROM pg_replication_slots WHERE slot_name = '${escapeLiteral(slotName)}' LIMIT 1`
+  ]);
+  const row = result.stdout.trim();
+  if (!row) return null;
+  const [confirmedFlushLsnRaw, restartLsnRaw, activeRaw] = row.split('\t');
+  return {
+    confirmedFlushLsn: confirmedFlushLsnRaw || null,
+    restartLsn: restartLsnRaw || null,
+    active: activeRaw === '1'
+  };
+}
+
+async function runSqlQueryAsync(sql) {
+  const result = await runSqlCommandAsync(['-Atc', sql]);
+  return result.stdout.trim();
+}
+
+async function runSqlCommandAsync(psqlArgs) {
+  const child = spawn(
+    'docker',
+    ['exec', '-i', postgresContainerName, 'psql', '-U', 'postgres', '-d', 'powersync_benchmark_test', ...psqlArgs],
+    { stdio: ['ignore', 'pipe', 'pipe'] }
+  );
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (chunk) => {
+    stdout += chunk.toString();
+  });
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk.toString();
+  });
+  const code = await new Promise((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', resolve);
+  });
+  if (code !== 0) {
+    throw new Error(`psql query failed: ${stderr || stdout}`);
+  }
+  return { stdout, stderr };
 }
 
 function runSqlCommand(psqlArgs, input = undefined) {
@@ -5541,6 +6059,22 @@ function escapeLiteral(value) {
 
 function formatMs(value) {
   return value == null ? 'n/a' : `${value.toFixed(1)} ms`;
+}
+
+function formatSeconds(value) {
+  return value == null ? 'n/a' : `${value.toFixed(3)} s`;
+}
+
+function formatBytes(value) {
+  if (value == null) return 'n/a';
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+  let scaled = Number(value);
+  let unit = 0;
+  while (Math.abs(scaled) >= 1024 && unit < units.length - 1) {
+    scaled /= 1024;
+    unit += 1;
+  }
+  return `${scaled.toFixed(unit === 0 ? 0 : 2)} ${units[unit]}`;
 }
 
 function formatFold(value) {

@@ -4,7 +4,7 @@
 
 The harness measures one generated workload and a constrained set of client-visible fields. It does not measure full PowerSync compatibility, production reliability, operational cost, or the causal effect of any single language or storage engine.
 
-The checked-in data is historical and exploratory. It was recorded before the current correctness and security changes, does not identify a Git commit, and used different deployment topologies for the official and Rust targets. It is not evidence of current-tree performance. Do not use the ratios as product-level performance claims.
+The checked-in `100k-auth-perimeter`, `1m-auth-perimeter`, and `1m-parity-gated` data is historical and exploratory. Those runs predate the current correctness and security changes, do not identify a Git commit, and used different deployment topologies for the official and Rust targets. They are not evidence of current-tree performance. The separate symmetric canary identifies its commit and uses a symmetric container topology, but has one ordered pair per rung and is only a scale-safety result. Do not use either set as a product-level performance claim.
 
 ## Historical topology and current timing controls
 
@@ -14,7 +14,13 @@ The checked-in data is historical and exploratory. It was recorded before the cu
 
 Docker image pulls and MongoDB replica-set provisioning happen before measurement. The clock starts before each target's startup sequence. Official timing includes service-container start. Rust timing includes launching and waiting about 250 ms for the local PostgreSQL forwarding container before spawning the native service process. The historical metric ends on each target's own readiness condition, so it is named **target startup sequence to target-specific readiness**. It is not an isolated snapshot-processing clock.
 
-Fresh runs can set `POWERSYNC_USER_VALUE_INITIAL_READINESS=sync-protocol`. That mode stops the initial clock only when the same externally visible `/sync/stream` subscription response reaches `checkpoint_complete` and proves the expected contents of one analytically generated routed project bucket. In `auth_perimeter` mode the fixture adds one access row for the dedicated `user-benchmark-readiness-probe` identity and project 1; its JWT can resolve exactly that bucket. In subscription mode the probe subscribes directly to project 1. The probe specification is built before the clock and scales with rows in one project, not total fixture rows. Persisted-LSN and control-plane readiness remain secondary diagnostics. The default `target-specific` mode exists for diagnosis and is not a publication boundary.
+Fresh runs can set `POWERSYNC_USER_VALUE_INITIAL_READINESS=sync-protocol`. The harness starts three observers from the same clock:
+
+1. **Validated checkpoint completion for one routed subscription.** The same externally visible `/sync/stream` response must reach `checkpoint_complete` and prove the expected contents of one analytically generated routed project bucket. The timing includes downloading and validating that response; it is not the instant at which the first row became usable.
+2. **Complete initial source materialization.** Official diagnostics must explicitly report initial replication complete and reach the captured fixture LSN. Rust must expose `last_persisted_end_lsn` at or beyond that LSN; the implementation writes it atomically with its internal snapshot-complete marker, so the harness infers completion from that contract. This is a target-specific boundary, not a common protocol signal.
+3. **Replication-slot position.** PostgreSQL must report the target's replication slot `confirmed_flush_lsn` at or beyond the captured fixture LSN. Slot creation can establish this position before later consumer work, so it is not labeled an acknowledgement and does not prove that every bucket is materialized or durable.
+
+In `auth_perimeter` mode the fixture adds one access row for the dedicated `user-benchmark-readiness-probe` identity and project 1; its JWT can resolve exactly that bucket. In subscription mode the probe subscribes directly to project 1. The probe specification is built before the clock and scales with rows in one project, not total fixture rows. The first boundary is the headline client-visible timing. The other two are reported separately and must not be conflated with it. The default `target-specific` mode exists for diagnosis and is not a publication boundary.
 
 In the historical checked-in runs, the Rust replication slot was created before the measured service start while the official service created its slot during startup. The current harness provisions each target's publication with the fixture before timing, but no longer pre-creates Rust's slot; both slots are now created after the measured start boundary. This correction is another reason the historical timings cannot describe the current harness.
 
@@ -30,6 +36,16 @@ network placement; it does not pretend MongoDB and MDBX have identical engine
 semantics. MongoDB provisioning remains outside the measured window because
 it is a separate required storage service, while both measured service starts
 create a fresh container.
+
+## Resource evidence
+
+The symmetric runner captures a baseline immediately before measured service start and snapshots after initial readiness, browser work, initial equivalence, churn, and finalization. Each repeat retains phase deltas and the raw snapshots.
+
+On a Linux host running Docker directly, each target component is measured through cgroup v2 and `/proc`: cumulative CPU time, cgroup current and lifetime peak memory, container init-process current and lifetime peak RSS, block reads/writes, and network receive/transmit counters. Storage paths are walked to record both logical bytes and filesystem-allocated bytes. PostgreSQL insert-LSN distance records the cluster-wide inserted WAL-position delta during each phase.
+
+The official target is reported as separate service and MongoDB components; Rust is reported as one service component. Network traffic is not summed across official components because service-to-MongoDB traffic is visible in both network namespaces. The memory high-water marks are lifetime diagnostics, not measurement-window stack peaks, and MongoDB can include provisioning before the baseline. WAL position is cluster-wide and is not the number of bytes decoded or stored by either target.
+
+Docker Desktop cannot expose the host `/proc` and cgroup files for its Linux VM. In that environment the harness records Docker stats as diagnostic evidence: instantaneous CPU percentage, current memory, and cumulative block/network counters. It reports cumulative CPU time and peak RSS as unavailable rather than zero. Publication mode rejects this fallback and requires complete native Linux cgroup/proc evidence.
 
 ## Workload
 
@@ -54,7 +70,7 @@ The `100k-auth-perimeter` and `1m-auth-perimeter` runs were recorded on June 14,
 | `100k` | 100,102 | 251 | 7,035.711 ms | 915.083 ms | 7.689x |
 | `1m` | 1,000,402 | 1,000 | 57,886.216 ms | 5,046.112 ms | 11.471x |
 
-The table reports ratios of medians, not paired-repeat speedups. Five samples are enough to expose gross repeatability problems, but not enough to estimate tail latency. Comparison-level p95 fields from the original export were removed during the reproducible presentation normalization; retained per-target timing p95 fields are traceability data and must not be cited as SLO evidence.
+The table reports ratios of medians, not paired-repeat speedups. Five samples are enough to expose gross repeatability problems, but not enough to estimate tail latency. Retained per-target timing p95 fields are traceability data and must not be cited as SLO evidence.
 
 The older `1m-parity-gated` artifact is a historical, single-sample subscription-parameter run. It is not comparable to the later auth-perimeter runs and should not be used as supporting evidence.
 
@@ -63,7 +79,7 @@ The older `1m-parity-gated` artifact is a historical, single-sample subscription
 Checked-in artifacts omit raw per-bucket observations and therefore are validation summaries, not independent proof. The original runs recorded mutable Docker tags rather than resolved image digests and did not record Git/file hashes. A fresh harness run now records:
 
 - Git commit and dirty state;
-- SHA-256 hashes for both lockfiles, the harness, fixture, generated rules, and Rust executable;
+- SHA-256 hashes for both lockfiles, the harness, resource collector, fixture, generated rules, and Rust executable;
 - SHA-256 hashes of the generated official configurations after known secrets are replaced with fixed redaction markers, plus the separately supplied official configuration fragment;
 - Rust build/profile controls, JWT audience/issuer policy, and a sanitized PostgreSQL transport/TLS policy;
 - resolved Docker image ids and repository digests;
@@ -82,13 +98,14 @@ A defensible comparison should:
 3. use the same storage class and durability expectations;
 4. pin all container images by digest;
 5. use identical PostgreSQL placement and network paths;
-6. define one readiness boundary based on externally observable work;
-7. collect at least 20 measured paired repeats and publish every sample;
-8. retain raw per-bucket validation records as compressed release assets;
-9. include official-service tuning proposed or reviewed by the PowerSync team;
-10. rerun the current tree after every material snapshot, cursor, durability, authentication, or readiness change.
+6. report client-visible readiness, target-specific complete materialization, and replication-slot confirmed-flush position as separate boundaries;
+7. record CPU, clearly labeled memory high-water marks, block I/O, network traffic, storage growth, and cluster-wide inserted WAL-position deltas for every repeat;
+8. collect at least 20 measured paired repeats and publish every sample;
+9. retain raw per-bucket validation records as compressed release assets;
+10. include official-service tuning proposed or reviewed by the PowerSync team;
+11. rerun the current tree after every material snapshot, cursor, durability, authentication, or readiness change.
 
-`POWERSYNC_USER_VALUE_PUBLIC_RUN=1` checks these conditions before starting PostgreSQL or pulling an image. It also requires a clean worktree, `symmetric-docker` on a Linux host, an explicit matching target budget and official service/MongoDB split, interleaved targets, at least one warmup pair, the initial and churn protocol gates, `slot-lsn`, `sync-protocol`, raw-record retention, digest-pinned official/MongoDB/PostgreSQL/Rust image references, and an explicit attestation that official tuning was reviewed. A locally built Rust tag can exercise the runner but cannot pass publication preflight.
+`POWERSYNC_USER_VALUE_PUBLIC_RUN=1` checks the static conditions before starting PostgreSQL or pulling an image, then rejects a run if any required native cgroup/proc resource field is unavailable. It also requires a clean worktree, `symmetric-docker` on a Linux host, an explicit matching target budget and official service/MongoDB split, interleaved targets, at least one warmup pair, the initial and churn protocol gates, `slot-lsn`, `sync-protocol`, raw-record retention, digest-pinned official/MongoDB/PostgreSQL/Rust image references, and an explicit attestation that official tuning was reviewed. A locally built Rust tag can exercise the runner but cannot pass publication preflight.
 
 ## Command
 

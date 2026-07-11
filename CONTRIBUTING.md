@@ -12,7 +12,8 @@ cargo test --locked -q
 node --check scripts/user_value_benchmark.mjs
 node --check scripts/linux_canary_ladder.mjs
 node --check scripts/export_artifacts.mjs
-node --test scripts/user_value_benchmark.test.mjs scripts/export_artifacts.test.mjs scripts/linux_canary_ladder.test.mjs
+node --check scripts/export_canary_ladder.mjs
+node --test scripts/*.test.mjs
 npm --prefix e2e/official-sdk audit
 npm --prefix e2e/official-sdk run build
 cargo audit
@@ -30,6 +31,12 @@ Export a completed run with:
 
 ```sh
 node scripts/export_artifacts.mjs <run-dir> <label>
+```
+
+Export a completed release ladder with:
+
+```sh
+node scripts/export_canary_ladder.mjs <ladder-dir> <label>
 ```
 
 Do not hand-edit generated JSON artifacts. Raw validation records should be attached to a release or discussion when a performance claim depends on them.

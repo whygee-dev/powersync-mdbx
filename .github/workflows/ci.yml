@@ -49,9 +49,11 @@ jobs:
       - name: harness checks
         run: |
           node --check scripts/user_value_benchmark.mjs
+          node --check scripts/resource_evidence.mjs
           node --check scripts/linux_canary_ladder.mjs
           node --check scripts/export_artifacts.mjs
-          node --test scripts/user_value_benchmark.test.mjs scripts/export_artifacts.test.mjs scripts/linux_canary_ladder.test.mjs
+          node --check scripts/export_canary_ladder.mjs
+          node --test scripts/*.test.mjs
 
       - name: e2e build
         run: |

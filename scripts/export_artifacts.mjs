@@ -34,6 +34,7 @@ if (!fs.existsSync(runDir)) {
   console.error(`run directory not found: ${runDir}`);
   process.exit(1);
 }
+const scrubbedRunDir = `<repo>/${path.relative(repoRoot, runDir)}`;
 
 const outDir = path.join(repoRoot, 'docs', 'artifacts', label);
 fs.mkdirSync(outDir, { recursive: true });
@@ -42,7 +43,7 @@ for (const legacyName of ['compare.json', 'summary.md']) {
 }
 
 function scrub(content) {
-  return content.split(runDir).join(`<repo>/tmp/user-value-benchmark/${path.basename(runDir)}`)
+  return content.split(runDir).join(scrubbedRunDir)
     .split(repoRoot).join('<repo>');
 }
 
@@ -119,8 +120,15 @@ function buildParitySummary({ results, compare }) {
       protocolValidator: validator
     },
     timing: timingSummary(results.targets ?? {}),
+    resources: resourceSummary(results.targets ?? {}),
     comparison: {
       processing: comparisonMetricSummary(comparison.endUserExperience?.['processing.processingMs']),
+      completeMaterialization: comparisonMetricSummary(
+        comparison.endUserExperience?.['processing.completeMaterializationMs']
+      ),
+      sourceSlotPosition: comparisonMetricSummary(
+        comparison.endUserExperience?.['processing.sourceSlotPositionMs']
+      ),
       churnSlotAckCatchup: comparisonMetricSummary(
         comparison.endUserExperience?.['churn.slotAckCatchupMs']
       ),
@@ -151,6 +159,23 @@ function buildParitySummary({ results, compare }) {
   };
 }
 
+function resourceSummary(targets) {
+  return Object.fromEntries(
+    Object.entries(targets).map(([label, target]) => [
+      label,
+      {
+        summary: target.endUser?.summary?.resources ?? null,
+        samples: (target.endUser?.runs ?? []).map((run) => ({
+          repeat: run.repeat,
+          status: run.resources?.status ?? 'unavailable',
+          initial: run.resources?.initial ?? null,
+          total: run.resources?.total ?? null
+        }))
+      }
+    ])
+  );
+}
+
 function comparisonMetricSummary(metric) {
   if (!metric) return null;
   return {
@@ -169,6 +194,8 @@ function timingSummary(targets) {
         label,
         {
           processingMs: summary.processing?.processingMs ?? null,
+          completeMaterializationMs: summary.processing?.completeMaterializationMs ?? null,
+          sourceSlotPositionMs: summary.processing?.sourceSlotPositionMs ?? null,
           churnApplySqlMs: summary.churn?.applySqlMs ?? null,
           churnReplicationCatchupMs: summary.churn?.replicationCatchupMs ?? null,
           churnSlotAckCatchupMs: summary.churn?.slotAckCatchupMs ?? null,
@@ -187,6 +214,8 @@ function sampleTimings(targets) {
       (target.endUser?.runs ?? []).map((run) => ({
         repeat: run.repeat,
         processingMs: run.readiness?.processingMs ?? null,
+        completeMaterializationMs: run.readiness?.completeMaterialization?.processingMs ?? null,
+        sourceSlotPositionMs: run.readiness?.sourceSlotPosition?.processingMs ?? null,
         churnApplySqlMs: run.churn?.applySqlMs ?? null,
         churnReplicationCatchupMs: run.churn?.replicationCatchupMs ?? null,
         churnSlotAckCatchupMs: run.churn?.slotAckCatchupMs ?? null,
