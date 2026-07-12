@@ -1049,6 +1049,7 @@ async function runEndUserLaneOnce(target, targetDir, repeat, { warmup = false } 
   let equivalence = null;
   const runResult = {};
   let publicationResourceError = null;
+  let primaryError = null;
   try {
     ({ endpoint } = await startTargetAndWaitReady(target, dashboardRulesYaml, publicRun ? 1 : 2));
     const readiness = await waitForScenarioReady({
@@ -1130,6 +1131,9 @@ async function runEndUserLaneOnce(target, targetDir, repeat, { warmup = false } 
       raw: browserResult
     });
     return runResult;
+  } catch (error) {
+    primaryError = error;
+    throw error;
   } finally {
     if (equivalence?.verificationSpecs) delete equivalence.verificationSpecs;
     let stopError = null;
@@ -1176,11 +1180,19 @@ async function runEndUserLaneOnce(target, targetDir, repeat, { warmup = false } 
         stopError = error;
       }
     }
-    if (publicationResourceError != null && stopError != null) {
-      throw new AggregateError([publicationResourceError, stopError], 'resource validation and target teardown failed');
+    const followUpErrors = [publicationResourceError, stopError].filter((error) => error != null);
+    if (primaryError != null) {
+      if (followUpErrors.length > 0) {
+        throw new AggregateError(
+          [primaryError, ...followUpErrors],
+          'run failed; resource validation or target teardown also failed'
+        );
+      }
+    } else if (followUpErrors.length > 1) {
+      throw new AggregateError(followUpErrors, 'resource validation and target teardown failed');
+    } else if (followUpErrors.length === 1) {
+      throw followUpErrors[0];
     }
-    if (publicationResourceError != null) throw publicationResourceError;
-    if (stopError != null) throw stopError;
   }
 }
 

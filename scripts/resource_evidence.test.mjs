@@ -212,3 +212,33 @@ test('storage accounting distinguishes sparse logical and allocated bytes', () =
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('storage walk skips entries that vanish during measurement', (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'resource-evidence-'));
+  try {
+    const kept = path.join(directory, 'kept');
+    const vanished = path.join(directory, 'vanished');
+    fs.writeFileSync(kept, 'data');
+    fs.writeFileSync(vanished, 'gone');
+    const realLstatSync = fs.lstatSync.bind(fs);
+    t.mock.method(fs, 'lstatSync', (target, options) => {
+      if (target === vanished) {
+        throw Object.assign(new Error(`ENOENT: no such file or directory, lstat '${target}'`), { code: 'ENOENT' });
+      }
+      return realLstatSync(target, options);
+    });
+    const measured = measurePath(directory);
+    assert.equal(measured.files, 1);
+    assert.equal(measured.logicalBytes, 4);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('storage deltas stay signed when allocation shrinks between snapshots', () => {
+  const delta = diffResourceSnapshots(
+    { storage: { data: { logicalBytes: 100, allocatedBytes: 200, files: 3 } } },
+    { storage: { data: { logicalBytes: 120, allocatedBytes: 150, files: 2 } } }
+  );
+  assert.deepEqual(delta.storage.data, { logicalBytes: 20, allocatedBytes: -50, files: -1 });
+});

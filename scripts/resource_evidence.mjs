@@ -228,9 +228,9 @@ function diffStorage(before = {}, after = {}) {
     [...labels].map((label) => [
       label,
       {
-        logicalBytes: counterDelta(before[label]?.logicalBytes, after[label]?.logicalBytes, before[label] == null),
-        allocatedBytes: counterDelta(before[label]?.allocatedBytes, after[label]?.allocatedBytes, before[label] == null),
-        files: counterDelta(before[label]?.files, after[label]?.files, before[label] == null)
+        logicalBytes: signedDelta(before[label]?.logicalBytes, after[label]?.logicalBytes, before[label] == null),
+        allocatedBytes: signedDelta(before[label]?.allocatedBytes, after[label]?.allocatedBytes, before[label] == null),
+        files: signedDelta(before[label]?.files, after[label]?.files, before[label] == null)
       }
     ])
   );
@@ -248,9 +248,24 @@ export function measurePath(filePath) {
   const pending = [filePath];
   while (pending.length > 0) {
     const current = pending.pop();
-    const stat = fs.lstatSync(current, { bigint: true });
+    // Live data directories drop entries between listing and stat (journal
+    // rotation, checkpoint temp files); skip vanished paths instead of failing.
+    let stat;
+    try {
+      stat = fs.lstatSync(current, { bigint: true });
+    } catch (error) {
+      if (error?.code === 'ENOENT') continue;
+      throw error;
+    }
     if (stat.isDirectory()) {
-      for (const entry of fs.readdirSync(current)) pending.push(path.join(current, entry));
+      let entries;
+      try {
+        entries = fs.readdirSync(current);
+      } catch (error) {
+        if (error?.code === 'ENOENT') continue;
+        throw error;
+      }
+      for (const entry of entries) pending.push(path.join(current, entry));
       continue;
     }
     totals.files += 1;
@@ -391,6 +406,15 @@ function counterDelta(before, after, missingBeforeIsZero = false) {
   const start = before == null && missingBeforeIsZero ? 0 : Number(before);
   const finish = Number(after);
   if (!Number.isFinite(start) || !Number.isFinite(finish) || finish < start) return null;
+  return finish - start;
+}
+
+// Storage sizes are not monotonic counters: allocated bytes legitimately
+// shrink when a store releases preallocated extents or drops temp files.
+function signedDelta(before, after, missingBeforeIsZero = false) {
+  const start = before == null && missingBeforeIsZero ? 0 : Number(before);
+  const finish = Number(after);
+  if (!Number.isFinite(start) || !Number.isFinite(finish)) return null;
   return finish - start;
 }
 
