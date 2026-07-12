@@ -1,0 +1,1034 @@
+{
+  "schemaVersion": 1,
+  "gitCommit": "c43e1ce963d737dda25f883661531e58f98f6535",
+  "rustImageId": "sha256:59dbb72b5fd08be16508824869fbc7200c15af22a18d9554ddc89cc11ac23804",
+  "dockerServer": "os=linux arch=aarch64 cpus=6 memory=16748593152",
+  "status": "passed",
+  "methodology": {
+    "measuredRunsPerTargetPerRung": 1,
+    "targetOrder": "recorded in each rung",
+    "targetStores": "empty at the start of each measured run",
+    "cacheControl": "OS and PostgreSQL caches were not flushed",
+    "protocolBoundary": "first successful expected-state proof for one routed subscription through checkpoint_complete",
+    "additionalInitialBoundaries": "target-specific complete materialization and replication-slot confirmed-flush position captured for both targets at every rung",
+    "resourceEvidence": "captured for both targets at every rung"
+  },
+  "rungs": [
+    {
+      "profile": "250k",
+      "sourceTaskRows": 250202,
+      "routedBucketSamples": 200,
+      "elapsedMs": 57089,
+      "targetResources": {
+        "cpus": 4,
+        "memory": "8g",
+        "explicit": true,
+        "splitMatchesTotal": true
+      },
+      "officialResourceSplit": {
+        "service": {
+          "cpus": 1.5,
+          "memory": "2g",
+          "explicit": true
+        },
+        "mongo": {
+          "cpus": 2.5,
+          "memory": "6g",
+          "explicit": true
+        }
+      },
+      "officialTuning": {
+        "mongoCacheGb": "2",
+        "nodeOptions": "--max-old-space-size-percentage=80",
+        "reviewedByPowerSync": false
+      },
+      "storageControls": {
+        "classesAttested": true,
+        "durabilityPoliciesAttested": true,
+        "classes": {
+          "official": "Docker bind mount on the host filesystem; MongoDB data below the shared artifact root",
+          "rust": "Docker bind mount on the host filesystem; MDBX data below the shared artifact root"
+        },
+        "durabilityPolicies": {
+          "official": "PowerSync default MongoDB writes; MongoDB WiredTiger journaling enabled",
+          "rust": "libmdbx SyncMode::Durable"
+        }
+      },
+      "imageInputs": {
+        "official": "journeyapps/powersync-service@sha256:b6b22fa7d0d862f04bdff62846e656756d17bcf3dd6eca399a0633671051438b",
+        "mongo": "mongo@sha256:d5b3ca8c3f3cdce78d44870dc0871b76d5235e9b2ad4ea6bea5d1fbff8027703",
+        "postgres": "postgres@sha256:be01cf82fc7dbba824acf0a82e150b4b360f3ff93c6631d7844af431e841a95c",
+        "rust": "sha256:59dbb72b5fd08be16508824869fbc7200c15af22a18d9554ddc89cc11ac23804"
+      },
+      "rawValidationRecordsRetained": true,
+      "executionSchedule": [
+        {
+          "lane": "endUser",
+          "repeat": 1,
+          "target": "official"
+        },
+        {
+          "lane": "endUser",
+          "repeat": 1,
+          "target": "rust"
+        }
+      ],
+      "official": {
+        "protocolReadinessMs": 19261.633,
+        "completeMaterialization": {
+          "completionBoundary": "official-diagnostics-initial-replication-lsn",
+          "processingMs": 18769.185,
+          "targetLsn": "0/92AE7B8"
+        },
+        "sourceSlotPosition": {
+          "method": "replication-slot-confirmed-flush-lsn",
+          "processingMs": 1571.924,
+          "targetLsn": "0/92AE7B8",
+          "confirmed_flush_lsn": "0/92AE7F0"
+        },
+        "resourceEvidenceStatus": "captured",
+        "resources": {
+          "status": "captured",
+          "initial": {
+            "durationMs": 19672,
+            "walInsertedBytes": 553112,
+            "components": {
+              "service": {
+                "status": "captured",
+                "source": "linux-cgroup-v2",
+                "access": "docker-exec",
+                "cpuSeconds": 14.640708,
+                "cgroupLifetimePeakMemoryBytes": 264499200,
+                "mainProcessLifetimePeakRssBytes": 303742976,
+                "blockReadBytes": 892928,
+                "blockWriteBytes": 0,
+                "networkRxBytes": 89272628,
+                "networkTxBytes": 498934175
+              },
+              "mongo": {
+                "status": "captured",
+                "source": "linux-cgroup-v2",
+                "access": "docker-exec",
+                "cpuSeconds": 8.17912,
+                "cgroupLifetimePeakMemoryBytes": 1580822528,
+                "mainProcessLifetimePeakRssBytes": 1397551104,
+                "blockReadBytes": 0,
+                "blockWriteBytes": 0,
+                "networkRxBytes": 498412767,
+                "networkTxBytes": 20955558
+              }
+            },
+            "storageGrowth": {
+              "mongo-db": {
+                "logicalBytes": 173248454,
+                "allocatedBytes": 183308288,
+                "files": 40
+              },
+              "mongo-config": {
+                "logicalBytes": 0,
+                "allocatedBytes": 0,
+                "files": 0
+              }
+            }
+          },
+          "total": {
+            "durationMs": 29949,
+            "walInsertedBytes": 3003232,
+            "components": {
+              "service": {
+                "status": "captured",
+                "source": "linux-cgroup-v2",
+                "access": "docker-exec",
+                "cpuSeconds": 16.105925,
+                "cgroupLifetimePeakMemoryBytes": 280035328,
+                "mainProcessLifetimePeakRssBytes": 320413696,
+                "blockReadBytes": 892928,
+                "blockWriteBytes": 0,
+                "networkRxBytes": 159091333,
+                "networkTxBytes": 573682453
+              },
+              "mongo": {
+                "status": "captured",
+                "source": "linux-cgroup-v2",
+                "access": "docker-exec",
+                "cpuSeconds": 9.215203,
+                "cgroupLifetimePeakMemoryBytes": 1602449408,
+                "mainProcessLifetimePeakRssBytes": 1418166272,
+                "blockReadBytes": 0,
+                "blockWriteBytes": 0,
+                "networkRxBytes": 512854661,
+                "networkTxBytes": 89163115
+              }
+            },
+            "storageGrowth": {
+              "mongo-db": {
+                "logicalBytes": 174478097,
+                "allocatedBytes": 184360960,
+                "files": 40
+              },
+              "mongo-config": {
+                "logicalBytes": 0,
+                "allocatedBytes": 0,
+                "files": 0
+              }
+            }
+          }
+        },
+        "initialEquivalence": {
+          "status": "passed",
+          "buckets": 200,
+          "puts": 100082,
+          "removes": 0
+        },
+        "churn": {
+          "status": "passed",
+          "buckets": 200,
+          "puts": 4000,
+          "removes": 2000
+        }
+      },
+      "rust": {
+        "protocolReadinessMs": 2080.123,
+        "completeMaterialization": {
+          "completionBoundary": "rust-persisted-initial-snapshot-lsn",
+          "processingMs": 1987.407,
+          "targetLsn": "0/10F00A10"
+        },
+        "sourceSlotPosition": {
+          "method": "replication-slot-confirmed-flush-lsn",
+          "processingMs": 633.689,
+          "targetLsn": "0/10F00A10",
+          "confirmed_flush_lsn": "0/10F00A48"
+        },
+        "resourceEvidenceStatus": "captured",
+        "resources": {
+          "status": "captured",
+          "initial": {
+            "durationMs": 2172,
+            "walInsertedBytes": 448,
+            "components": {
+              "service": {
+                "status": "captured",
+                "source": "linux-cgroup-v2",
+                "access": "docker-exec",
+                "cpuSeconds": 1.388493,
+                "cgroupLifetimePeakMemoryBytes": 79912960,
+                "mainProcessLifetimePeakRssBytes": 71237632,
+                "blockReadBytes": 471040,
+                "blockWriteBytes": 0,
+                "networkRxBytes": 68094577,
+                "networkTxBytes": 397233
+              }
+            },
+            "storageGrowth": {
+              "mdbx": {
+                "logicalBytes": 419434496,
+                "allocatedBytes": 419434496,
+                "files": 2
+              }
+            }
+          },
+          "total": {
+            "durationMs": 7575,
+            "walInsertedBytes": 2728968,
+            "components": {
+              "service": {
+                "status": "captured",
+                "source": "linux-cgroup-v2",
+                "access": "docker-exec",
+                "cpuSeconds": 2.420638,
+                "cgroupLifetimePeakMemoryBytes": 264970240,
+                "mainProcessLifetimePeakRssBytes": 262316032,
+                "blockReadBytes": 471040,
+                "blockWriteBytes": 0,
+                "networkRxBytes": 69961581,
+                "networkTxBytes": 58856809
+              }
+            },
+            "storageGrowth": {
+              "mdbx": {
+                "logicalBytes": 452988928,
+                "allocatedBytes": 452988928,
+                "files": 2
+              }
+            }
+          }
+        },
+        "initialEquivalence": {
+          "status": "passed",
+          "buckets": 200,
+          "puts": 100082,
+          "removes": 0
+        },
+        "churn": {
+          "status": "passed",
+          "buckets": 200,
+          "puts": 4000,
+          "removes": 2000
+        }
+      }
+    },
+    {
+      "profile": "1m",
+      "sourceTaskRows": 1000402,
+      "routedBucketSamples": 100,
+      "elapsedMs": 146739,
+      "targetResources": {
+        "cpus": 4,
+        "memory": "8g",
+        "explicit": true,
+        "splitMatchesTotal": true
+      },
+      "officialResourceSplit": {
+        "service": {
+          "cpus": 1.5,
+          "memory": "2g",
+          "explicit": true
+        },
+        "mongo": {
+          "cpus": 2.5,
+          "memory": "6g",
+          "explicit": true
+        }
+      },
+      "officialTuning": {
+        "mongoCacheGb": "2",
+        "nodeOptions": "--max-old-space-size-percentage=80",
+        "reviewedByPowerSync": false
+      },
+      "storageControls": {
+        "classesAttested": true,
+        "durabilityPoliciesAttested": true,
+        "classes": {
+          "official": "Docker bind mount on the host filesystem; MongoDB data below the shared artifact root",
+          "rust": "Docker bind mount on the host filesystem; MDBX data below the shared artifact root"
+        },
+        "durabilityPolicies": {
+          "official": "PowerSync default MongoDB writes; MongoDB WiredTiger journaling enabled",
+          "rust": "libmdbx SyncMode::Durable"
+        }
+      },
+      "imageInputs": {
+        "official": "journeyapps/powersync-service@sha256:b6b22fa7d0d862f04bdff62846e656756d17bcf3dd6eca399a0633671051438b",
+        "mongo": "mongo@sha256:d5b3ca8c3f3cdce78d44870dc0871b76d5235e9b2ad4ea6bea5d1fbff8027703",
+        "postgres": "postgres@sha256:be01cf82fc7dbba824acf0a82e150b4b360f3ff93c6631d7844af431e841a95c",
+        "rust": "sha256:59dbb72b5fd08be16508824869fbc7200c15af22a18d9554ddc89cc11ac23804"
+      },
+      "rawValidationRecordsRetained": true,
+      "executionSchedule": [
+        {
+          "lane": "endUser",
+          "repeat": 1,
+          "target": "official"
+        },
+        {
+          "lane": "endUser",
+          "repeat": 1,
+          "target": "rust"
+        }
+      ],
+      "official": {
+        "protocolReadinessMs": 81064.549,
+        "completeMaterialization": {
+          "completionBoundary": "official-diagnostics-initial-replication-lsn",
+          "processingMs": 80723.3,
+          "targetLsn": "0/1FDFD1C0"
+        },
+        "sourceSlotPosition": {
+          "method": "replication-slot-confirmed-flush-lsn",
+          "processingMs": 1656.381,
+          "targetLsn": "0/1FDFD1C0",
+          "confirmed_flush_lsn": "0/1FDFD1F8"
+        },
+        "resourceEvidenceStatus": "captured",
+        "resources": {
+          "status": "captured",
+          "initial": {
+            "durationMs": 81522,
+            "walInsertedBytes": 2385720,
+            "components": {
+              "service": {
+                "status": "captured",
+                "source": "linux-cgroup-v2",
+                "access": "docker-exec",
+                "cpuSeconds": 58.717894,
+                "cgroupLifetimePeakMemoryBytes": 275914752,
+                "mainProcessLifetimePeakRssBytes": 310194176,
+                "blockReadBytes": 5423104,
+                "blockWriteBytes": 0,
+                "networkRxBytes": 355896668,
+                "networkTxBytes": 1997526816
+              },
+              "mongo": {
+                "status": "captured",
+                "source": "linux-cgroup-v2",
+                "access": "docker-exec",
+                "cpuSeconds": 44.745076,
+                "cgroupLifetimePeakMemoryBytes": 2858323968,
+                "mainProcessLifetimePeakRssBytes": 2083745792,
+                "blockReadBytes": 12288,
+                "blockWriteBytes": 0,
+                "networkRxBytes": 1996086502,
+                "networkTxBytes": 82614415
+              }
+            },
+            "storageGrowth": {
+              "mongo-db": {
+                "logicalBytes": 742050285,
+                "allocatedBytes": 765370368,
+                "files": 40
+              },
+              "mongo-config": {
+                "logicalBytes": 0,
+                "allocatedBytes": 0,
+                "files": 0
+              }
+            }
+          },
+          "total": {
+            "durationMs": 91996,
+            "walInsertedBytes": 3611904,
+            "components": {
+              "service": {
+                "status": "captured",
+                "source": "linux-cgroup-v2",
+                "access": "docker-exec",
+                "cpuSeconds": 59.846951,
+                "cgroupLifetimePeakMemoryBytes": 296865792,
+                "mainProcessLifetimePeakRssBytes": 332533760,
+                "blockReadBytes": 5423104,
+                "blockWriteBytes": 0,
+                "networkRxBytes": 420991585,
+                "networkTxBytes": 2063524580
+              },
+              "mongo": {
+                "status": "captured",
+                "source": "linux-cgroup-v2",
+                "access": "docker-exec",
+                "cpuSeconds": 45.497359,
+                "cgroupLifetimePeakMemoryBytes": 2861473792,
+                "mainProcessLifetimePeakRssBytes": 2083520512,
+                "blockReadBytes": 12288,
+                "blockWriteBytes": 0,
+                "networkRxBytes": 2003223715,
+                "networkTxBytes": 146872435
+              }
+            },
+            "storageGrowth": {
+              "mongo-db": {
+                "logicalBytes": 744390033,
+                "allocatedBytes": 766423040,
+                "files": 40
+              },
+              "mongo-config": {
+                "logicalBytes": 0,
+                "allocatedBytes": 0,
+                "files": 0
+              }
+            }
+          }
+        },
+        "initialEquivalence": {
+          "status": "passed",
+          "buckets": 100,
+          "puts": 100042,
+          "removes": 0
+        },
+        "churn": {
+          "status": "passed",
+          "buckets": 100,
+          "puts": 2000,
+          "removes": 1000
+        }
+      },
+      "rust": {
+        "protocolReadinessMs": 7223.196,
+        "completeMaterialization": {
+          "completionBoundary": "rust-persisted-initial-snapshot-lsn",
+          "processingMs": 6522.252,
+          "targetLsn": "0/3E6943A0"
+        },
+        "sourceSlotPosition": {
+          "method": "replication-slot-confirmed-flush-lsn",
+          "processingMs": 622.13,
+          "targetLsn": "0/3E6943A0",
+          "confirmed_flush_lsn": "0/3E6943D8"
+        },
+        "resourceEvidenceStatus": "captured",
+        "resources": {
+          "status": "captured",
+          "initial": {
+            "durationMs": 7318,
+            "walInsertedBytes": 27240,
+            "components": {
+              "service": {
+                "status": "captured",
+                "source": "linux-cgroup-v2",
+                "access": "docker-exec",
+                "cpuSeconds": 4.712318,
+                "cgroupLifetimePeakMemoryBytes": 89145344,
+                "mainProcessLifetimePeakRssBytes": 67395584,
+                "blockReadBytes": 471040,
+                "blockWriteBytes": 0,
+                "networkRxBytes": 272480098,
+                "networkTxBytes": 1003158
+              }
+            },
+            "storageGrowth": {
+              "mdbx": {
+                "logicalBytes": 1677725696,
+                "allocatedBytes": 1677725696,
+                "files": 2
+              }
+            }
+          },
+          "total": {
+            "durationMs": 14179,
+            "walInsertedBytes": 1394336,
+            "components": {
+              "service": {
+                "status": "captured",
+                "source": "linux-cgroup-v2",
+                "access": "docker-exec",
+                "cpuSeconds": 5.712533,
+                "cgroupLifetimePeakMemoryBytes": 248983552,
+                "mainProcessLifetimePeakRssBytes": 252047360,
+                "blockReadBytes": 471040,
+                "blockWriteBytes": 0,
+                "networkRxBytes": 273436730,
+                "networkTxBytes": 57949505
+              }
+            },
+            "storageGrowth": {
+              "mdbx": {
+                "logicalBytes": 1677725696,
+                "allocatedBytes": 1677725696,
+                "files": 2
+              }
+            }
+          }
+        },
+        "initialEquivalence": {
+          "status": "passed",
+          "buckets": 100,
+          "puts": 100042,
+          "removes": 0
+        },
+        "churn": {
+          "status": "passed",
+          "buckets": 100,
+          "puts": 2000,
+          "removes": 1000
+        }
+      }
+    },
+    {
+      "profile": "2m",
+      "sourceTaskRows": 2000802,
+      "routedBucketSamples": 100,
+      "elapsedMs": 268281,
+      "targetResources": {
+        "cpus": 4,
+        "memory": "8g",
+        "explicit": true,
+        "splitMatchesTotal": true
+      },
+      "officialResourceSplit": {
+        "service": {
+          "cpus": 1.5,
+          "memory": "2g",
+          "explicit": true
+        },
+        "mongo": {
+          "cpus": 2.5,
+          "memory": "6g",
+          "explicit": true
+        }
+      },
+      "officialTuning": {
+        "mongoCacheGb": "2",
+        "nodeOptions": "--max-old-space-size-percentage=80",
+        "reviewedByPowerSync": false
+      },
+      "storageControls": {
+        "classesAttested": true,
+        "durabilityPoliciesAttested": true,
+        "classes": {
+          "official": "Docker bind mount on the host filesystem; MongoDB data below the shared artifact root",
+          "rust": "Docker bind mount on the host filesystem; MDBX data below the shared artifact root"
+        },
+        "durabilityPolicies": {
+          "official": "PowerSync default MongoDB writes; MongoDB WiredTiger journaling enabled",
+          "rust": "libmdbx SyncMode::Durable"
+        }
+      },
+      "imageInputs": {
+        "official": "journeyapps/powersync-service@sha256:b6b22fa7d0d862f04bdff62846e656756d17bcf3dd6eca399a0633671051438b",
+        "mongo": "mongo@sha256:d5b3ca8c3f3cdce78d44870dc0871b76d5235e9b2ad4ea6bea5d1fbff8027703",
+        "postgres": "postgres@sha256:be01cf82fc7dbba824acf0a82e150b4b360f3ff93c6631d7844af431e841a95c",
+        "rust": "sha256:59dbb72b5fd08be16508824869fbc7200c15af22a18d9554ddc89cc11ac23804"
+      },
+      "rawValidationRecordsRetained": true,
+      "executionSchedule": [
+        {
+          "lane": "endUser",
+          "repeat": 1,
+          "target": "official"
+        },
+        {
+          "lane": "endUser",
+          "repeat": 1,
+          "target": "rust"
+        }
+      ],
+      "official": {
+        "protocolReadinessMs": 163499.099,
+        "completeMaterialization": {
+          "completionBoundary": "official-diagnostics-initial-replication-lsn",
+          "processingMs": 163090.157,
+          "targetLsn": "0/3E89C000"
+        },
+        "sourceSlotPosition": {
+          "method": "replication-slot-confirmed-flush-lsn",
+          "processingMs": 2154.215,
+          "targetLsn": "0/3E89C000",
+          "confirmed_flush_lsn": "0/3E910770"
+        },
+        "resourceEvidenceStatus": "captured",
+        "resources": {
+          "status": "captured",
+          "initial": {
+            "durationMs": 163954,
+            "walInsertedBytes": 3154160,
+            "components": {
+              "service": {
+                "status": "captured",
+                "source": "linux-cgroup-v2",
+                "access": "docker-exec",
+                "cpuSeconds": 111.852769,
+                "cgroupLifetimePeakMemoryBytes": 275279872,
+                "mainProcessLifetimePeakRssBytes": 305819648,
+                "blockReadBytes": 13357056,
+                "blockWriteBytes": 0,
+                "networkRxBytes": 712433585,
+                "networkTxBytes": 3999696156
+              },
+              "mongo": {
+                "status": "captured",
+                "source": "linux-cgroup-v2",
+                "access": "docker-exec",
+                "cpuSeconds": 97.865569,
+                "cgroupLifetimePeakMemoryBytes": 3670716416,
+                "mainProcessLifetimePeakRssBytes": 2226327552,
+                "blockReadBytes": 40960,
+                "blockWriteBytes": 0,
+                "networkRxBytes": 3997413956,
+                "networkTxBytes": 164754946
+              }
+            },
+            "storageGrowth": {
+              "mongo-db": {
+                "logicalBytes": 1593289470,
+                "allocatedBytes": 1617592320,
+                "files": 41
+              },
+              "mongo-config": {
+                "logicalBytes": 0,
+                "allocatedBytes": 0,
+                "files": 0
+              }
+            }
+          },
+          "total": {
+            "durationMs": 174263,
+            "walInsertedBytes": 5594544,
+            "components": {
+              "service": {
+                "status": "captured",
+                "source": "linux-cgroup-v2",
+                "access": "docker-exec",
+                "cpuSeconds": 113.105386,
+                "cgroupLifetimePeakMemoryBytes": 285917184,
+                "mainProcessLifetimePeakRssBytes": 325832704,
+                "blockReadBytes": 13357056,
+                "blockWriteBytes": 0,
+                "networkRxBytes": 777546948,
+                "networkTxBytes": 4065786488
+              },
+              "mongo": {
+                "status": "captured",
+                "source": "linux-cgroup-v2",
+                "access": "docker-exec",
+                "cpuSeconds": 99.007118,
+                "cgroupLifetimePeakMemoryBytes": 3670716416,
+                "mainProcessLifetimePeakRssBytes": 2226450432,
+                "blockReadBytes": 40960,
+                "blockWriteBytes": 0,
+                "networkRxBytes": 4004549580,
+                "networkTxBytes": 229062498
+              }
+            },
+            "storageGrowth": {
+              "mongo-db": {
+                "logicalBytes": 1597912689,
+                "allocatedBytes": 1634373632,
+                "files": 41
+              },
+              "mongo-config": {
+                "logicalBytes": 0,
+                "allocatedBytes": 0,
+                "files": 0
+              }
+            }
+          }
+        },
+        "initialEquivalence": {
+          "status": "passed",
+          "buckets": 100,
+          "puts": 100042,
+          "removes": 0
+        },
+        "churn": {
+          "status": "passed",
+          "buckets": 100,
+          "puts": 2000,
+          "removes": 1000
+        }
+      },
+      "rust": {
+        "protocolReadinessMs": 13471.143,
+        "completeMaterialization": {
+          "completionBoundary": "rust-persisted-initial-snapshot-lsn",
+          "processingMs": 12614.983,
+          "targetLsn": "0/7BC76A08"
+        },
+        "sourceSlotPosition": {
+          "method": "replication-slot-confirmed-flush-lsn",
+          "processingMs": 923.24,
+          "targetLsn": "0/7BC76A08",
+          "confirmed_flush_lsn": "0/7BC76A40"
+        },
+        "resourceEvidenceStatus": "captured",
+        "resources": {
+          "status": "captured",
+          "initial": {
+            "durationMs": 13564,
+            "walInsertedBytes": 27296,
+            "components": {
+              "service": {
+                "status": "captured",
+                "source": "linux-cgroup-v2",
+                "access": "docker-exec",
+                "cpuSeconds": 8.855698,
+                "cgroupLifetimePeakMemoryBytes": 102395904,
+                "mainProcessLifetimePeakRssBytes": 74035200,
+                "blockReadBytes": 13250560,
+                "blockWriteBytes": 0,
+                "networkRxBytes": 545892504,
+                "networkTxBytes": 1236479
+              }
+            },
+            "storageGrowth": {
+              "mdbx": {
+                "logicalBytes": 3338670080,
+                "allocatedBytes": 3338670080,
+                "files": 2
+              }
+            }
+          },
+          "total": {
+            "durationMs": 22088,
+            "walInsertedBytes": 2684040,
+            "components": {
+              "service": {
+                "status": "captured",
+                "source": "linux-cgroup-v2",
+                "access": "docker-exec",
+                "cpuSeconds": 9.742928,
+                "cgroupLifetimePeakMemoryBytes": 276848640,
+                "mainProcessLifetimePeakRssBytes": 255496192,
+                "blockReadBytes": 13250560,
+                "blockWriteBytes": 0,
+                "networkRxBytes": 546840870,
+                "networkTxBytes": 58243593
+              }
+            },
+            "storageGrowth": {
+              "mdbx": {
+                "logicalBytes": 3338670080,
+                "allocatedBytes": 3338670080,
+                "files": 2
+              }
+            }
+          }
+        },
+        "initialEquivalence": {
+          "status": "passed",
+          "buckets": 100,
+          "puts": 100042,
+          "removes": 0
+        },
+        "churn": {
+          "status": "passed",
+          "buckets": 100,
+          "puts": 2000,
+          "removes": 1000
+        }
+      }
+    },
+    {
+      "profile": "5m",
+      "sourceTaskRows": 5001002,
+      "routedBucketSamples": 50,
+      "elapsedMs": 651605,
+      "targetResources": {
+        "cpus": 4,
+        "memory": "8g",
+        "explicit": true,
+        "splitMatchesTotal": true
+      },
+      "officialResourceSplit": {
+        "service": {
+          "cpus": 1.5,
+          "memory": "2g",
+          "explicit": true
+        },
+        "mongo": {
+          "cpus": 2.5,
+          "memory": "6g",
+          "explicit": true
+        }
+      },
+      "officialTuning": {
+        "mongoCacheGb": "2",
+        "nodeOptions": "--max-old-space-size-percentage=80",
+        "reviewedByPowerSync": false
+      },
+      "storageControls": {
+        "classesAttested": true,
+        "durabilityPoliciesAttested": true,
+        "classes": {
+          "official": "Docker bind mount on the host filesystem; MongoDB data below the shared artifact root",
+          "rust": "Docker bind mount on the host filesystem; MDBX data below the shared artifact root"
+        },
+        "durabilityPolicies": {
+          "official": "PowerSync default MongoDB writes; MongoDB WiredTiger journaling enabled",
+          "rust": "libmdbx SyncMode::Durable"
+        }
+      },
+      "imageInputs": {
+        "official": "journeyapps/powersync-service@sha256:b6b22fa7d0d862f04bdff62846e656756d17bcf3dd6eca399a0633671051438b",
+        "mongo": "mongo@sha256:d5b3ca8c3f3cdce78d44870dc0871b76d5235e9b2ad4ea6bea5d1fbff8027703",
+        "postgres": "postgres@sha256:be01cf82fc7dbba824acf0a82e150b4b360f3ff93c6631d7844af431e841a95c",
+        "rust": "sha256:59dbb72b5fd08be16508824869fbc7200c15af22a18d9554ddc89cc11ac23804"
+      },
+      "rawValidationRecordsRetained": true,
+      "executionSchedule": [
+        {
+          "lane": "endUser",
+          "repeat": 1,
+          "target": "official"
+        },
+        {
+          "lane": "endUser",
+          "repeat": 1,
+          "target": "rust"
+        }
+      ],
+      "official": {
+        "protocolReadinessMs": 407988.473,
+        "completeMaterialization": {
+          "completionBoundary": "official-diagnostics-initial-replication-lsn",
+          "processingMs": 407532.774,
+          "targetLsn": "0/99722B20"
+        },
+        "sourceSlotPosition": {
+          "method": "replication-slot-confirmed-flush-lsn",
+          "processingMs": 2169.719,
+          "targetLsn": "0/99722B20",
+          "confirmed_flush_lsn": "0/99722B58"
+        },
+        "resourceEvidenceStatus": "captured",
+        "resources": {
+          "status": "captured",
+          "initial": {
+            "durationMs": 408492,
+            "walInsertedBytes": 7000880,
+            "components": {
+              "service": {
+                "status": "captured",
+                "source": "linux-cgroup-v2",
+                "access": "docker-exec",
+                "cpuSeconds": 275.111295,
+                "cgroupLifetimePeakMemoryBytes": 288788480,
+                "mainProcessLifetimePeakRssBytes": 321007616,
+                "blockReadBytes": 19959808,
+                "blockWriteBytes": 0,
+                "networkRxBytes": 1782946238,
+                "networkTxBytes": 10000336513
+              },
+              "mongo": {
+                "status": "captured",
+                "source": "linux-cgroup-v2",
+                "access": "docker-exec",
+                "cpuSeconds": 296.582474,
+                "cgroupLifetimePeakMemoryBytes": 4573982720,
+                "mainProcessLifetimePeakRssBytes": 2417577984,
+                "blockReadBytes": 548864,
+                "blockWriteBytes": 0,
+                "networkRxBytes": 9994929017,
+                "networkTxBytes": 410786033
+              }
+            },
+            "storageGrowth": {
+              "mongo-db": {
+                "logicalBytes": 3741737633,
+                "allocatedBytes": 3780300800,
+                "files": 43
+              },
+              "mongo-config": {
+                "logicalBytes": 0,
+                "allocatedBytes": 0,
+                "files": 0
+              }
+            }
+          },
+          "total": {
+            "durationMs": 428751,
+            "walInsertedBytes": 8651664,
+            "components": {
+              "service": {
+                "status": "captured",
+                "source": "linux-cgroup-v2",
+                "access": "docker-exec",
+                "cpuSeconds": 276.794631,
+                "cgroupLifetimePeakMemoryBytes": 301256704,
+                "mainProcessLifetimePeakRssBytes": 339914752,
+                "blockReadBytes": 19959808,
+                "blockWriteBytes": 0,
+                "networkRxBytes": 1845774046,
+                "networkTxBytes": 10062209050
+              },
+              "mongo": {
+                "status": "captured",
+                "source": "linux-cgroup-v2",
+                "access": "docker-exec",
+                "cpuSeconds": 298.356873,
+                "cgroupLifetimePeakMemoryBytes": 4615454720,
+                "mainProcessLifetimePeakRssBytes": 2428162048,
+                "blockReadBytes": 548864,
+                "blockWriteBytes": 0,
+                "networkRxBytes": 9998510473,
+                "networkTxBytes": 473189368
+              }
+            },
+            "storageGrowth": {
+              "mongo-db": {
+                "logicalBytes": 3759483081,
+                "allocatedBytes": 3797614592,
+                "files": 43
+              },
+              "mongo-config": {
+                "logicalBytes": 0,
+                "allocatedBytes": 0,
+                "files": 0
+              }
+            }
+          }
+        },
+        "initialEquivalence": {
+          "status": "passed",
+          "buckets": 50,
+          "puts": 100022,
+          "removes": 0
+        },
+        "churn": {
+          "status": "passed",
+          "buckets": 50,
+          "puts": 1000,
+          "removes": 500
+        }
+      },
+      "rust": {
+        "protocolReadinessMs": 33663.031,
+        "completeMaterialization": {
+          "completionBoundary": "rust-persisted-initial-snapshot-lsn",
+          "processingMs": 33517.161,
+          "targetLsn": "1/31FB4000"
+        },
+        "sourceSlotPosition": {
+          "method": "replication-slot-confirmed-flush-lsn",
+          "processingMs": 1101.399,
+          "targetLsn": "1/31FB4000",
+          "confirmed_flush_lsn": "1/31FD62C0"
+        },
+        "resourceEvidenceStatus": "captured",
+        "resources": {
+          "status": "captured",
+          "initial": {
+            "durationMs": 33790,
+            "walInsertedBytes": 1189504,
+            "components": {
+              "service": {
+                "status": "captured",
+                "source": "linux-cgroup-v2",
+                "access": "docker-exec",
+                "cpuSeconds": 24.739234,
+                "cgroupLifetimePeakMemoryBytes": 116830208,
+                "mainProcessLifetimePeakRssBytes": 82788352,
+                "blockReadBytes": 19582976,
+                "blockWriteBytes": 0,
+                "networkRxBytes": 1367518849,
+                "networkTxBytes": 2599436
+              }
+            },
+            "storageGrowth": {
+              "mdbx": {
+                "logicalBytes": 8304726016,
+                "allocatedBytes": 8304726016,
+                "files": 2
+              }
+            }
+          },
+          "total": {
+            "durationMs": 47099,
+            "walInsertedBytes": 2938152,
+            "components": {
+              "service": {
+                "status": "captured",
+                "source": "linux-cgroup-v2",
+                "access": "docker-exec",
+                "cpuSeconds": 25.641237,
+                "cgroupLifetimePeakMemoryBytes": 283455488,
+                "mainProcessLifetimePeakRssBytes": 252051456,
+                "blockReadBytes": 19582976,
+                "blockWriteBytes": 0,
+                "networkRxBytes": 1368029478,
+                "networkTxBytes": 58884538
+              }
+            },
+            "storageGrowth": {
+              "mdbx": {
+                "logicalBytes": 8304726016,
+                "allocatedBytes": 8304726016,
+                "files": 2
+              }
+            }
+          }
+        },
+        "initialEquivalence": {
+          "status": "passed",
+          "buckets": 50,
+          "puts": 100022,
+          "removes": 0
+        },
+        "churn": {
+          "status": "passed",
+          "buckets": 50,
+          "puts": 1000,
+          "removes": 500
+        }
+      }
+    }
+  ]
+}

@@ -47,30 +47,39 @@ Bootstrap state includes the PostgreSQL source, slot, rules, snapshot marker, du
 
 TLS and JWT policy also fail closed: TCP PostgreSQL connections require either `verify-full` or an explicit `disable`, and configured JWT keys require exact audience and issuer policy.
 
-## Recorded scale canary (previous baseline)
+## Current scale canary
 
-This canary predates the current calibration harness and candidate official baseline. Both targets ran as Linux containers on one Docker Desktop network; each target had the same aggregate limit of 4 CPUs and 8 GiB. The recorded official target used the previous split: 2.5 CPUs/5 GiB for the PowerSync service and 1.5 CPUs/3 GiB for MongoDB. The current candidate instead assigns 1.5 CPUs/2 GiB to the service and 2.5 CPUs/6 GiB to MongoDB; the table below has not been rerun with that allocation.
+Both targets ran as Linux containers on one Docker Desktop network with the same aggregate limit of 4 CPUs and 8 GiB. Rust received that limit directly. The official target assigned 1.5 CPUs/2 GiB to the PowerSync service and 2.5 CPUs/6 GiB to MongoDB, with a 2 GiB WiredTiger cache.
 
-The common initial boundary was the first successful `/sync/stream` checkpoint/data/checkpoint-complete proof for the same routed subscription. Each cell is one measured scale-canary run from an empty target store. Every rung ran the official target first and Rust second; OS and PostgreSQL caches were not flushed.
+The headline boundary is the first `/sync/stream` response that proves the expected state of one routed subscription through `checkpoint_complete`. Complete source materialization is measured separately using each implementation's internal completion contract. Every target started with an empty store.
 
-| Source task rows | Official service | Rust/MDBX |
-| ---: | ---: | ---: |
-| 250,202 | 16.11 s | 1.83 s |
-| 1,000,402 | 66.20 s | 7.02 s |
-| 2,000,802 | 148.71 s | 12.26 s |
-| 5,001,002 | 403.16 s | 31.87 s |
+| Source task rows | Official protocol readiness | Rust/MDBX protocol readiness | Ratio | Official complete materialization | Rust/MDBX complete materialization | Ratio |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 250,202 | 19.26 s | 2.08 s | 9.26x | 18.77 s | 1.99 s | 9.44x |
+| 1,000,402 | 81.06 s | 7.22 s | 11.22x | 80.72 s | 6.52 s | 12.38x |
+| 2,000,802 | 163.50 s | 13.47 s | 12.14x | 163.09 s | 12.61 s | 12.93x |
+| 5,001,002 | 407.99 s | 33.66 s | 12.12x | 407.53 s | 33.52 s | 12.16x |
 
-The official service's elapsed time was 8.80x, 9.43x, 12.13x, and 12.65x the Rust/MDBX elapsed time across the four rungs. Those ratios describe these four runs. A repeated, counterbalanced matrix is required to estimate a performance distribution or tail latency.
+Rust/MDBX reached client-validated readiness 9.26x to 12.14x faster across the four rungs and completed initial materialization 9.44x to 12.93x faster. These are four single-run scale-canary ratios, not estimates of a latency distribution. The run order was official then Rust at every rung, and OS and PostgreSQL caches were not flushed.
 
-Both targets passed the selected-bucket equivalence, authorization-isolation, and incremental churn gates at every rung. The verifier sampled 200, 100, 100, and 50 routed buckets respectively. It compared checkpoint count/checksum recurrence and client-visible PUT/REMOVE semantics, not only readiness timings.
+Both targets passed exact selected-bucket initial-state and incremental-churn checks at every rung, including authorization isolation, checkpoint count/checksum recurrence, and client-visible PUT/REMOVE semantics. The verifier checked 200, 100, 100, and 50 routed buckets; the corresponding initial proofs covered 100,082, 100,042, 100,042, and 100,022 PUT operations per target.
 
-The path-scrubbed symmetric canary summary records the exact timings, tested commit, image inputs, resource split, and gate counts. Compressed validation sidecars were retained locally but are not checked in.
+Initial-window resource evidence was captured from Linux cgroup v2 and container `/proc` counters:
 
-Local release checks passed 245 Rust tests, six live PostgreSQL replication tests, and 65 Node harness/export/ladder tests, along with formatting, warnings-denied Clippy, dependency audits, and the frontend build.
+| Rows | Official CPU, service + MongoDB | Rust CPU | Official peak memory, service / MongoDB | Rust peak memory | Official / Rust allocated storage growth | Official / Rust inserted WAL |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 250,202 | 22.82 CPU-s | 1.39 CPU-s | 252 / 1,508 MiB | 76 MiB | 0.17 / 0.39 GiB | 0.53 / 0.0004 MiB |
+| 1,000,402 | 103.46 CPU-s | 4.71 CPU-s | 263 / 2,726 MiB | 85 MiB | 0.71 / 1.56 GiB | 2.28 / 0.026 MiB |
+| 2,000,802 | 209.72 CPU-s | 8.86 CPU-s | 263 / 3,501 MiB | 98 MiB | 1.51 / 3.11 GiB | 3.01 / 0.026 MiB |
+| 5,001,002 | 571.69 CPU-s | 24.74 CPU-s | 275 / 4,362 MiB | 111 MiB | 3.52 / 7.73 GiB | 6.68 / 1.13 MiB |
 
-The host was Docker Desktop on macOS rather than controlled native Linux hardware, the service/MongoDB split was not reviewed by the PowerSync team, and the local Rust image was identified by image ID rather than a registry digest. The harness revision used for this ladder did not record CPU, memory, I/O, network, storage growth, or WAL volume. The current candidate baseline and resource collector postdate these results, so the recorded ratios do not describe the new configuration.
+Memory values are cgroup lifetime peaks, so MongoDB includes provisioning before the measured window. Inserted WAL is the cluster-wide WAL-position delta during the window. Network counters are reported per component rather than summed because service-to-MongoDB traffic appears in both namespaces. The checked-in [canary artifact](docs/artifacts/symmetric-canary/README.md) contains the exact timings, boundaries, CPU, peak memory, block I/O, per-component network traffic, storage growth, WAL, tested commit, image identities, and gate counts.
 
-The other compact artifacts under `docs/artifacts/` are older exploratory runs from an asymmetric topology. They predate material correctness and security changes and are not evidence for the current tree. See the [benchmark methodology](docs/benchmark.md) before quoting any result.
+The canary took 18 minutes 44 seconds and retained about 13 GiB locally. It ran in Docker Desktop's Linux VM rather than on controlled native Linux hardware. Official, MongoDB, and PostgreSQL images were digest-pinned; the locally built Rust image was executed and recorded by immutable image ID. A repeated, counterbalanced native-Linux matrix remains the appropriate next step for distributional performance claims.
+
+Local release checks passed 245 Rust tests, six live PostgreSQL replication tests, and 66 Node harness/export/ladder tests, along with formatting, warnings-denied Clippy, dependency audits, and the frontend build.
+
+The other compact artifacts under `docs/artifacts/` are older exploratory runs from asymmetric topologies and earlier implementation revisions. See the [benchmark methodology](docs/benchmark.md) before quoting any result.
 
 ## Build and test
 
@@ -145,7 +154,7 @@ POWERSYNC_USER_VALUE_RETAIN_RAW_RECORDS=1 \
 node scripts/user_value_benchmark.mjs
 ```
 
-This command uses the current candidate official baseline: 1.5 CPU/2 GiB for the service and 2.5 CPU/6 GiB for MongoDB, with a 2 GiB WiredTiger cache. It is not the configuration used by the previous-baseline table.
+This command uses the recorded canary allocation: 1.5 CPU/2 GiB for the service and 2.5 CPU/6 GiB for MongoDB, with a 2 GiB WiredTiger cache.
 
 Calibrate the official service/MongoDB CPU split at 250k before an expensive matrix:
 
@@ -161,7 +170,7 @@ Run the bounded release ladder from a clean worktree:
 node scripts/linux_canary_ladder.mjs
 ```
 
-The ladder builds the Rust image, pins the official service, MongoDB, and PostgreSQL images, stops on the first failure, checks compressed raw records and resource evidence, and writes an append-only manifest under `tmp/linux-canary-ladder/`. It requires a Linux Docker server and checks for 150 GiB of free disk before the 5m rung. It is a correctness and scale-safety gate, not a statistical performance matrix. The recorded previous-baseline canary took 17 minutes 31 seconds and produced about 13 GiB of artifacts; those figures do not estimate the cost of the current harness and allocation.
+The ladder builds the Rust image, pins the official service, MongoDB, and PostgreSQL images, stops on the first failure, checks compressed raw records and resource evidence, and writes an append-only manifest under `tmp/linux-canary-ladder/`. It requires a Linux Docker server and checks for 150 GiB of free disk before the 5m rung. It is a correctness and scale-safety gate, not a statistical performance matrix. The current canary took 18 minutes 44 seconds and retained about 13 GiB of local artifacts.
 
 The current harness records three initial-replication boundaries concurrently:
 
