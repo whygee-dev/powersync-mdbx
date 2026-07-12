@@ -79,7 +79,7 @@ Memory values are cgroup lifetime peaks, so MongoDB includes provisioning before
 
 The canary took 18 minutes 44 seconds and retained about 13 GiB locally. It ran in Docker Desktop's Linux VM rather than on controlled native Linux hardware. Official, MongoDB, and PostgreSQL images were digest-pinned; the locally built Rust image was executed and recorded by immutable image ID. A repeated, counterbalanced native-Linux matrix remains the appropriate next step for distributional performance claims.
 
-Local release checks passed 245 Rust tests, six live PostgreSQL replication tests, and 66 Node harness/export/ladder tests, along with formatting, warnings-denied Clippy, dependency audits, and the frontend build.
+Local release checks passed 245 Rust tests, six live PostgreSQL replication tests, and 67 Node harness/export/ladder tests, along with formatting, warnings-denied Clippy, dependency audits, and the frontend build.
 
 The other compact artifacts under `docs/artifacts/` are older exploratory runs from asymmetric topologies and earlier implementation revisions. See the [benchmark methodology](docs/benchmark.md) before quoting any result.
 

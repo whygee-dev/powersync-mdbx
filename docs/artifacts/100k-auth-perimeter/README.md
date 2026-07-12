@@ -29,7 +29,7 @@ created its slot during startup. The current harness creates both slots after
 the common start boundary.
 
 [`parity-summary.json`](parity-summary.json) contains aggregate parity,
-timing, host, and sample data. Raw per-bucket observations and `results.json`
+timing, execution-topology, and sample data. Raw per-bucket observations and `results.json`
 were not retained, so the summary cannot be audited against raw observations or
 regenerated from the retained files.
 

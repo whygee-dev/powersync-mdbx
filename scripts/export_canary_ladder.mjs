@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { summarizePublicResourceEvidence } from './public_resource_evidence.mjs';
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 export function buildCanarySummary(ladder, loadResults) {
@@ -25,7 +27,6 @@ export function buildCanarySummary(ladder, loadResults) {
   );
   return {
     schemaVersion: 1,
-    recordedAt: ladder.finishedAt,
     gitCommit: ladder.gitCommit,
     rustImageId: ladder.rustImageId,
     dockerServer: ladder.dockerServer,
@@ -82,7 +83,7 @@ function summarizeRung(run, results) {
       completeMaterialization,
       sourceSlotPosition,
       resourceEvidenceStatus: measured.resources?.status ?? 'not-collected',
-      resources: summarizeResourceEvidence(measured.resources),
+      resources: summarizePublicResourceEvidence(measured.resources),
       initialEquivalence: summarizeGate(measured.equivalence),
       churn: summarizeGate(measured.churn)
     };
@@ -113,51 +114,6 @@ function summarizeRung(run, results) {
     executionSchedule: results.config?.executionSchedule ?? [],
     official: target('official'),
     rust: target('rust')
-  };
-}
-
-function summarizeResourceEvidence(resources) {
-  const summarizeWindow = (window) => {
-    if (window == null) return null;
-    return {
-      durationMs:
-        Number.isFinite(Date.parse(window.finishedAt)) && Number.isFinite(Date.parse(window.startedAt))
-          ? Date.parse(window.finishedAt) - Date.parse(window.startedAt)
-          : null,
-      walInsertedBytes: window.wal?.insertedBytes ?? null,
-      components: Object.fromEntries(
-        Object.entries(window.components ?? {}).map(([name, component]) => [
-          name,
-          {
-            status: component.status ?? null,
-            source: component.source ?? null,
-            access: component.access ?? null,
-            cpuSeconds: component.cpuSeconds ?? null,
-            cgroupLifetimePeakMemoryBytes: component.cgroupLifetimePeakMemoryBytes ?? null,
-            mainProcessLifetimePeakRssBytes: component.mainProcessLifetimePeakRssBytes ?? null,
-            blockReadBytes: component.blockReadBytes ?? null,
-            blockWriteBytes: component.blockWriteBytes ?? null,
-            networkRxBytes: component.networkRxBytes ?? null,
-            networkTxBytes: component.networkTxBytes ?? null
-          }
-        ])
-      ),
-      storageGrowth: Object.fromEntries(
-        Object.entries(window.storage ?? {}).map(([name, storage]) => [
-          name,
-          {
-            logicalBytes: storage.logicalBytes ?? null,
-            allocatedBytes: storage.allocatedBytes ?? null,
-            files: storage.files ?? null
-          }
-        ])
-      )
-    };
-  };
-  return {
-    status: resources?.status ?? 'not-collected',
-    initial: summarizeWindow(resources?.initial),
-    total: summarizeWindow(resources?.total)
   };
 }
 

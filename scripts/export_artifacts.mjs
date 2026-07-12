@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Exports compact, path-scrubbed benchmark artifacts from a harness run
+// Exports compact, privacy-scrubbed benchmark artifacts from a harness run
 // directory into docs/artifacts/<label>/ so a reviewer can mechanically
 // diff a fresh run against the published numbers.
 //
@@ -13,64 +13,14 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { exportedParityStatus } from './export_artifacts_status.mjs';
+import { summarizePublicResourceEvidence } from './public_resource_evidence.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-const [runDirArg, label] = process.argv.slice(2);
-if (!runDirArg || !label) {
-  console.error('usage: node scripts/export_artifacts.mjs <run-dir> <label>');
-  process.exit(1);
-}
-if (!/^[a-z0-9][a-z0-9-]*$/.test(label)) {
-  console.error(`label must be kebab-case, got ${JSON.stringify(label)}`);
-  process.exit(1);
-}
-
-const runDir = path.resolve(repoRoot, runDirArg);
-if (!fs.existsSync(runDir)) {
-  console.error(`run directory not found: ${runDir}`);
-  process.exit(1);
-}
-const scrubbedRunDir = `<repo>/${path.relative(repoRoot, runDir)}`;
-
-const outDir = path.join(repoRoot, 'docs', 'artifacts', label);
-fs.mkdirSync(outDir, { recursive: true });
-for (const legacyName of ['compare.json', 'summary.md']) {
-  fs.rmSync(path.join(outDir, legacyName), { force: true });
-}
-
-function scrub(content) {
-  return content.split(runDir).join(scrubbedRunDir)
-    .split(repoRoot).join('<repo>');
-}
-
-const exported = [];
-
-const resultsPath = path.join(runDir, 'results.json');
-const comparePath = path.join(runDir, 'compare.json');
-if (fs.existsSync(resultsPath) && fs.existsSync(comparePath)) {
-  const results = JSON.parse(fs.readFileSync(resultsPath, 'utf8'));
-  const compare = JSON.parse(fs.readFileSync(comparePath, 'utf8'));
-  fs.writeFileSync(
-    path.join(outDir, 'parity-summary.json'),
-    `${JSON.stringify(buildParitySummary({ results, compare }), null, 2)}\n`
-  );
-  exported.push('parity-summary.json');
-} else {
-  console.warn('skipping parity-summary.json: results.json or compare.json missing');
-}
-
-if (exported.length === 0) {
-  console.error('nothing exported');
-  process.exit(1);
-}
-console.log(`exported ${exported.join(', ')} -> ${path.relative(repoRoot, outDir)}`);
-console.log('Add or update the artifact README to describe the run configuration and evidence retained.');
-
-function buildParitySummary({ results, compare }) {
+export function buildParitySummary({ results, compare }) {
   const comparison = compare.comparisons?.[0] ?? {};
   const official = results.targets?.official;
   const rust = results.targets?.rust;
@@ -96,13 +46,10 @@ function buildParitySummary({ results, compare }) {
 
   return {
     profile: results.profile,
-    generatedAt: results.generatedAt,
-    artifactSource: scrub(runDir),
     sourceTaskRows: results.methodology?.equivalence?.datasetTaskRows ?? null,
     targets: results.config?.targets ?? Object.keys(results.targets ?? {}),
     sampleCount: results.config?.endUserSampleRepeats ?? officialRuns.length,
     percentileMethod: 'linear interpolation over successful samples, same as scripts/user_value_benchmark.mjs',
-    host: results.host ?? null,
     provenance: results.provenance ?? null,
     config: {
       accessMode: results.config?.accessMode ?? null,
@@ -167,9 +114,7 @@ function resourceSummary(targets) {
         summary: target.endUser?.summary?.resources ?? null,
         samples: (target.endUser?.runs ?? []).map((run) => ({
           repeat: run.repeat,
-          status: run.resources?.status ?? 'unavailable',
-          initial: run.resources?.initial ?? null,
-          total: run.resources?.total ?? null
+          ...summarizePublicResourceEvidence(run.resources)
         }))
       }
     ])
@@ -391,3 +336,36 @@ function sameSet(left, right) {
   const rightSet = new Set(right);
   return left.every((value) => rightSet.has(value));
 }
+
+function main() {
+  const [runDirArg, label] = process.argv.slice(2);
+  if (!runDirArg || !/^[a-z0-9][a-z0-9-]*$/.test(label ?? '')) {
+    throw new Error('usage: node scripts/export_artifacts.mjs <run-dir> <kebab-case-label>');
+  }
+
+  const runDir = path.resolve(repoRoot, runDirArg);
+  if (!fs.existsSync(runDir)) throw new Error(`run directory not found: ${runDir}`);
+
+  const outDir = path.join(repoRoot, 'docs', 'artifacts', label);
+  fs.mkdirSync(outDir, { recursive: true });
+  for (const legacyName of ['compare.json', 'summary.md']) {
+    fs.rmSync(path.join(outDir, legacyName), { force: true });
+  }
+
+  const resultsPath = path.join(runDir, 'results.json');
+  const comparePath = path.join(runDir, 'compare.json');
+  if (!fs.existsSync(resultsPath) || !fs.existsSync(comparePath)) {
+    throw new Error('nothing exported: results.json or compare.json missing');
+  }
+
+  const results = JSON.parse(fs.readFileSync(resultsPath, 'utf8'));
+  const compare = JSON.parse(fs.readFileSync(comparePath, 'utf8'));
+  fs.writeFileSync(
+    path.join(outDir, 'parity-summary.json'),
+    `${JSON.stringify(buildParitySummary({ results, compare }), null, 2)}\n`
+  );
+  console.log(`exported parity-summary.json -> ${path.relative(repoRoot, outDir)}`);
+  console.log('Add or update the artifact README to describe the run configuration and evidence retained.');
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();

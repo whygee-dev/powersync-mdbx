@@ -54,6 +54,7 @@ jobs:
           node --check scripts/linux_canary_ladder.mjs
           node --check scripts/export_artifacts.mjs
           node --check scripts/export_canary_ladder.mjs
+          node --check scripts/public_resource_evidence.mjs
           node --test scripts/*.test.mjs
 
       - name: e2e build

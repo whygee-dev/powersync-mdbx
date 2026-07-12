@@ -43,6 +43,8 @@ test('canary export retains timings, gate counts, provenance, and limitations', 
   };
   const summary = buildCanarySummary(ladder, () => results);
   assert.equal(summary.gitCommit, 'abc');
+  assert.equal(Object.hasOwn(summary, 'recordedAt'), false);
+  assert.equal(summary.dockerServer, 'os=linux');
   assert.equal(summary.methodology.resourceEvidence, 'not collected by this harness revision');
   assert.equal(summary.methodology.additionalInitialBoundaries, 'not collected by this harness revision');
   assert.equal(summary.rungs[0].sourceTaskRows, 250_202);
@@ -174,6 +176,7 @@ test('canary export retains compact initial and total resource evidence', () => 
     storageGrowth: { mdbx: { logicalBytes: 50, allocatedBytes: 60, files: 2 } }
   });
   assert.equal(summary.rungs[0].rust.resources.total.durationMs, 20_000);
-  assert.doesNotMatch(JSON.stringify(summary), /private\/path/);
-  assert.doesNotMatch(JSON.stringify(summary), /startLsn|endLsn/);
+  const serialized = JSON.stringify(summary);
+  assert.doesNotMatch(serialized, /private\/path|2000-01-01T/);
+  assert.doesNotMatch(serialized, /startedAt|finishedAt|startLsn|endLsn/);
 });
