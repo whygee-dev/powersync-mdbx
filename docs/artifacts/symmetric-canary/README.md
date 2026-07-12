@@ -2,20 +2,29 @@
 
 This artifact records one passing 250k/1m/2m/5m scale ladder for commit `c43e1ce963d737dda25f883661531e58f98f6535`. It is a correctness and scale canary with one measured run per target and rung, not a repeated performance matrix.
 
-Both targets ran in Linux containers on the same Docker Desktop network. Each target had an aggregate limit of 4 CPUs and 8 GiB. Rust received the full limit. The official target split it into 1.5 CPUs/2 GiB for the PowerSync service and 2.5 CPUs/6 GiB for MongoDB; WiredTiger used a 2 GiB cache.
+Both targets ran in Linux containers on the same Docker Desktop network. Each target had an aggregate limit of 4 CPUs and 8 GiB. Rust received the full limit. The official PowerSync 1.23.3 target split it into 1.5 CPUs/2 GiB for the service and 2.5 CPUs/6 GiB for MongoDB; WiredTiger used a 2 GiB cache. That allocation came from the repository's local calibration harness and was not reviewed by the PowerSync team.
 
 ## Initial replication
 
 Protocol readiness is the first successful expected-state proof for one routed subscription through `/sync/stream` and `checkpoint_complete`. Complete materialization is a separate target-specific boundary. The official service reports initial replication completion and its LSN; Rust persists the source LSN atomically with its internal snapshot-complete marker.
 
-| Source task rows | Official protocol readiness | Rust/MDBX protocol readiness | Ratio | Official complete materialization | Rust/MDBX complete materialization | Ratio |
-| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 250,202 | 19.262 s | 2.080 s | 9.260x | 18.769 s | 1.987 s | 9.444x |
-| 1,000,402 | 81.065 s | 7.223 s | 11.223x | 80.723 s | 6.522 s | 12.377x |
-| 2,000,802 | 163.499 s | 13.471 s | 12.137x | 163.090 s | 12.615 s | 12.928x |
-| 5,001,002 | 407.988 s | 33.663 s | 12.120x | 407.533 s | 33.517 s | 12.159x |
+| Source task rows | Official protocol readiness | Rust/MDBX protocol readiness | Official / Rust |
+| ---: | ---: | ---: | ---: |
+| 250,202 | 19.262 s | 2.080 s | 9.260x |
+| 1,000,402 | 81.065 s | 7.223 s | 11.223x |
+| 2,000,802 | 163.499 s | 13.471 s | 12.137x |
+| 5,001,002 | 407.988 s | 33.663 s | 12.120x |
 
 Every rung ran the official target first and Rust second from an empty target store. OS and PostgreSQL caches were not flushed. The ratios describe these runs only.
+
+| Source task rows | Official complete-materialization diagnostic | Rust/MDBX complete-materialization diagnostic |
+| ---: | ---: | ---: |
+| 250,202 | 18.769 s | 1.987 s |
+| 1,000,402 | 80.723 s | 6.522 s |
+| 2,000,802 | 163.090 s | 12.615 s |
+| 5,001,002 | 407.533 s | 33.517 s |
+
+The completion observers use different implementation contracts. This table records both diagnostic boundaries but does not treat them as a common metric or compute a cross-target ratio.
 
 ## Correctness gates
 

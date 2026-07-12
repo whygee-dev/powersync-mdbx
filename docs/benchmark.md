@@ -4,7 +4,7 @@
 
 The harness measures initial replication and deterministic churn for one generated workload and a constrained set of client-visible fields. It does not exercise unsupported protocol/rule forms, failover, backup/restore, rolling upgrades, or mixed read/write workloads, and it cannot isolate the effect of one language, storage engine, or architectural choice.
 
-The checked-in `100k-auth-perimeter`, `1m-auth-perimeter`, and `1m-parity-gated` data is historical and exploratory. Those runs predate the current correctness and security changes, do not identify a Git commit, and used different deployment topologies for the official and Rust targets. They are not evidence of current-tree performance. The current [symmetric scale canary](artifacts/symmetric-canary/README.md) identifies its commit, uses a symmetric container topology, and records initial CPU, peak memory, block I/O, per-component network traffic, storage growth, and WAL. It supports the four observed official/Rust elapsed-time ratios for that workload and configuration; one ordered pair per rung does not estimate a performance distribution or tail latency and cannot isolate the contribution of any one component.
+The checked-in `100k-auth-perimeter`, `1m-auth-perimeter`, and `1m-parity-gated` data is historical and exploratory. Those runs predate the current correctness and security changes, do not identify a Git commit, and used different deployment topologies for the official and Rust targets. They are not evidence of current-tree performance. The current [symmetric scale canary](artifacts/symmetric-canary/README.md) identifies its commit, compares PowerSync 1.23.3 with the Rust implementation in a symmetric container topology, and records initial CPU, peak memory, block I/O, per-component network traffic, storage growth, and WAL. It supports the four observed common protocol-readiness ratios for that workload and configuration. The official allocation was selected by the local calibration harness and was not reviewed by the PowerSync team. One ordered pair per rung does not estimate a performance distribution or tail latency and cannot isolate the contribution of any one component.
 
 ## Historical topology and current timing controls
 
@@ -87,9 +87,9 @@ Checked-in artifacts omit raw per-bucket observations. They preserve aggregate v
 
 Each run uses a unique append-only directory. The harness refuses `POWERSYNC_USER_VALUE_CLEAN_TMP=1`; it never bulk-deletes earlier matrix samples. `POWERSYNC_USER_VALUE_ARTIFACT_ROOT` selects a durable output root. With `POWERSYNC_USER_VALUE_RETAIN_RAW_RECORDS=1`, each validation batch writes a gzip-compressed sidecar containing the per-bucket protocol records while the ordinary JSON result retains compact digests and samples.
 
-## Requirements for a public comparison
+## Requirements for a repeated publication matrix
 
-A public comparison must:
+A comparison used to estimate a distribution, variance, or tail latency must:
 
 1. run both targets on Linux under the same process/container model;
 2. apply the same aggregate CPU and memory budget to each target and record the official service/MongoDB split;
@@ -107,6 +107,6 @@ A public comparison must:
 
 ## Command
 
-The native and symmetric canary invocations are in the repository README. Set `POWERSYNC_USER_VALUE_CHURN_GATE_MODE=slot-lsn` for a common PostgreSQL-side churn finish line and `POWERSYNC_USER_VALUE_INITIAL_READINESS=sync-protocol` for the common client-visible initial finish line. Native runs remain exploratory; publication requires the symmetric runner and all preflight controls above.
+The native and symmetric canary invocations are in the repository README. Set `POWERSYNC_USER_VALUE_CHURN_GATE_MODE=slot-lsn` for a common PostgreSQL-side churn finish line and `POWERSYNC_USER_VALUE_INITIAL_READINESS=sync-protocol` for the common client-visible initial finish line. Native runs remain exploratory. A repeated publication matrix uses the symmetric runner and all preflight controls above.
 
 Run `node scripts/official_resource_calibration.mjs` before freezing a matrix configuration. It compares four official-service/MongoDB CPU splits at 250k, keeps the total budget and storage tuning fixed, reverses candidate order on the second pass, and rejects samples without complete initial CPU, memory, cgroup I/O, network, storage-growth, and WAL-position evidence.

@@ -49,18 +49,20 @@ TLS and JWT policy also fail closed: TCP PostgreSQL connections require either `
 
 ## Current scale canary
 
-Both targets ran as Linux containers on one Docker Desktop network with the same aggregate limit of 4 CPUs and 8 GiB. Rust received that limit directly. The official target assigned 1.5 CPUs/2 GiB to the PowerSync service and 2.5 CPUs/6 GiB to MongoDB, with a 2 GiB WiredTiger cache.
+Both targets ran as Linux containers on one Docker Desktop network with the same aggregate limit of 4 CPUs and 8 GiB. Rust received that limit directly. The official PowerSync 1.23.3 target assigned 1.5 CPUs/2 GiB to the service and 2.5 CPUs/6 GiB to MongoDB, with a 2 GiB WiredTiger cache. That allocation was selected by the repository's local calibration harness; the PowerSync team has not reviewed it.
 
 The headline boundary is the first `/sync/stream` response that proves the expected state of one routed subscription through `checkpoint_complete`. Complete source materialization is measured separately using each implementation's internal completion contract. Every target started with an empty store.
 
-| Source task rows | Official protocol readiness | Rust/MDBX protocol readiness | Ratio | Official complete materialization | Rust/MDBX complete materialization | Ratio |
-| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 250,202 | 19.26 s | 2.08 s | 9.26x | 18.77 s | 1.99 s | 9.44x |
-| 1,000,402 | 81.06 s | 7.22 s | 11.22x | 80.72 s | 6.52 s | 12.38x |
-| 2,000,802 | 163.50 s | 13.47 s | 12.14x | 163.09 s | 12.61 s | 12.93x |
-| 5,001,002 | 407.99 s | 33.66 s | 12.12x | 407.53 s | 33.52 s | 12.16x |
+| Source task rows | Official protocol readiness | Rust/MDBX protocol readiness | Official / Rust |
+| ---: | ---: | ---: | ---: |
+| 250,202 | 19.26 s | 2.08 s | 9.26x |
+| 1,000,402 | 81.06 s | 7.22 s | 11.22x |
+| 2,000,802 | 163.50 s | 13.47 s | 12.14x |
+| 5,001,002 | 407.99 s | 33.66 s | 12.12x |
 
-Rust/MDBX reached client-validated readiness 9.26x to 12.14x faster across the four rungs and completed initial materialization 9.44x to 12.93x faster. These are four single-run scale-canary ratios, not estimates of a latency distribution. The run order was official then Rust at every rung, and OS and PostgreSQL caches were not flushed.
+Official protocol-readiness elapsed time was 9.26x to 12.14x the Rust/MDBX elapsed time across the four rungs. These are four single-run scale-canary ratios, not estimates of a latency distribution. The run order was official then Rust at every rung, and OS and PostgreSQL caches were not flushed.
+
+The target-specific complete-materialization observers recorded 18.77/1.99 s, 80.72/6.52 s, 163.09/12.61 s, and 407.53/33.52 s for official/Rust. They are implementation-specific diagnostic boundaries, not a shared protocol metric, so no cross-target ratio is claimed from them.
 
 Both targets passed exact selected-bucket initial-state and incremental-churn checks at every rung, including authorization isolation, checkpoint count/checksum recurrence, and client-visible PUT/REMOVE semantics. The verifier checked 200, 100, 100, and 50 routed buckets; the corresponding initial proofs covered 100,082, 100,042, 100,042, and 100,022 PUT operations per target.
 
@@ -119,7 +121,7 @@ Benchmark cost is intentionally tiered.
 1. Ordinary changes run the local checks only.
 2. Changes to ingestion, storage, protocol output, readiness, or the harness run a small symmetric-container smoke test.
 3. A release candidate runs the bounded 250k/1m/2m/5m ladder once.
-4. A public performance claim uses a frozen commit and a separate repeated matrix on controlled native Linux hardware.
+4. Distributional, variance, or tail-latency claims use a frozen commit and a separate repeated matrix on controlled native Linux hardware.
 
 Build the Linux benchmark image:
 
@@ -182,7 +184,7 @@ The first is the common client-visible timing. The second is implementation-spec
 
 Each repeat also records per-component CPU, cgroup lifetime peak memory, container init-process lifetime peak RSS, block I/O, network traffic, logical and allocated storage growth, and the cluster-wide inserted WAL-position delta. These high-water marks are lifetime diagnostics, not measurement-window peaks; MongoDB can include provisioning before the baseline. The runner reads container cgroup v2 and `/proc` counters directly, using `docker exec` when the Docker host is not local. Docker stats remains an incomplete fallback. Component network counters are not summed because service-to-storage traffic appears in more than one namespace.
 
-Publication runs additionally require a Linux host running the symmetric-container topology, immutable image digests including the Rust image, retained raw records, a clean tree, interleaved target order, warmups, at least 20 measured pairs, complete Linux cgroup/proc resource evidence, and explicit attestations for official-service tuning, storage class, and durability policy. `POWERSYNC_USER_VALUE_PUBLIC_RUN=1` enforces the machine-checkable controls, requires target-specific storage and durability descriptions, and persists them in the artifact. The complete methodology and configuration controls are in [docs/benchmark.md](docs/benchmark.md).
+Repeated publication matrices additionally require a Linux host running the symmetric-container topology, immutable image digests including the Rust image, retained raw records, a clean tree, interleaved target order, warmups, at least 20 measured pairs, complete Linux cgroup/proc resource evidence, and explicit attestations for official-service tuning, storage class, and durability policy. `POWERSYNC_USER_VALUE_PUBLIC_RUN=1` enforces those controls, requires target-specific storage and durability descriptions, and persists them in the artifact. The complete methodology and configuration controls are in [docs/benchmark.md](docs/benchmark.md).
 
 ## Repository layout
 
