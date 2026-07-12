@@ -2,7 +2,7 @@
 
 The repository does not provide deployment hardening, secret distribution, backup/restore automation, rolling upgrades, or an incident-response service. Deployments must supply those controls before exposing the service to an untrusted network.
 
-The code handles authentication and data routing, so security defects still matter. `/sync/stream` fails closed without configured JWT verification keys unless `POWERSYNC_RUST_ALLOW_ANONYMOUS_SYNC=1` is explicitly set for local benchmarking. Admin routes require an API token.
+The code performs authentication and data routing, so defects in it are in scope for reporting. `/sync/stream` fails closed without configured JWT verification keys unless `POWERSYNC_RUST_ALLOW_ANONYMOUS_SYNC=1` is explicitly set for local benchmarking. Admin routes require an API token.
 
 ## Reporting
 

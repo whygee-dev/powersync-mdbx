@@ -1,8 +1,8 @@
 # 1m auth-perimeter artifacts
 
 Compact validation summary from a historical paired official-vs-Rust `1m`
-processing-only run. Read the [benchmark methodology](../../benchmark.md)
-before using any value from this directory.
+processing-only run. The [benchmark methodology](../../benchmark.md) defines
+the claim limits for the values in this directory.
 
 The official service and MongoDB ran in Docker Desktop's resource-limited
 Linux VM; Rust and MDBX ran natively on the host. The run predates the
@@ -30,9 +30,14 @@ the common start boundary.
 [`parity-summary.json`](parity-summary.json) contains aggregate parity,
 timing, execution-topology, and sample data. Raw per-bucket observations and `results.json`
 were not retained, so the summary cannot be audited against raw observations or
-regenerated from the retained files.
+regenerated from the retained files. The summary was also written by an
+earlier revision of the export tooling: a fresh `export_artifacts.mjs` export
+additionally records provenance, resource evidence, and per-boundary timings
+absent here.
 
-Initial counts, PUT and semantic digests, checkpoint counts, and checkpoint
-checksums matched for every probed bucket. Churn PUT and REMOVE object digests
-also matched. Wire digests and churn checkpoint checksums are target-local
+Across all five measured pairs, initial counts, PUT and semantic digests,
+checkpoint counts, and checkpoint checksums matched for all 1,000 probed
+buckets — 1,000,402 initial PUT operations per target per repeat. Churn PUT
+and REMOVE object digests matched across all 30,000 incremental operations
+per repeat. Wire digests and churn checkpoint checksums are target-local
 because source-key and REMOVE subkey encodings differ.

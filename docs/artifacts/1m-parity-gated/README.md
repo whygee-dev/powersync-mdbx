@@ -1,14 +1,13 @@
 # 1m parity-gated artifacts
 
 Historical validation summary from one paired official-vs-Rust `1m`
-processing-only run using subscription parameters. Read the
-[benchmark methodology](../../benchmark.md) before using any value from this
-directory.
+processing-only run using subscription parameters. The
+[benchmark methodology](../../benchmark.md) defines the claim limits for the
+values in this directory.
 
-This run used the earlier asymmetric Docker Desktop/native-host topology. It
-predates current provenance capture and is not comparable to the later
-auth-perimeter runs. It is retained as development history, not as supporting
-performance evidence.
+This run used the earlier asymmetric Docker Desktop/native-host topology and
+predates current provenance capture. It is retained as development history;
+the auth-perimeter runs supersede it.
 
 Run shape:
 
@@ -21,9 +20,13 @@ Run shape:
 
 [`parity-summary.json`](parity-summary.json) preserves aggregate counts,
 digest comparison flags, checkpoint recurrence, timings, and validator
-metadata. Raw per-bucket observations were not retained.
+metadata. Raw per-bucket observations were not retained, and the summary was
+written by an earlier revision of the export tooling: a fresh
+`export_artifacts.mjs` export additionally records provenance, resource
+evidence, and per-boundary timings absent here.
 
 Initial counts, PUT and semantic digests, checkpoint counts, and checkpoint
-checksums matched for every probed bucket. Churn PUT and REMOVE object digests
-also matched. Wire digests and churn checkpoint checksums are target-local
+checksums matched for all 1,000 probed buckets in the recorded run, and churn
+PUT and REMOVE object digests matched across the 30,000 verified incremental
+operations. Wire digests and churn checkpoint checksums are target-local
 because source-key and REMOVE subkey encodings differ.

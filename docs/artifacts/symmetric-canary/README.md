@@ -24,7 +24,7 @@ Every rung ran the official target first and Rust second from an empty target st
 | 2,000,802 | 163.090 s | 12.615 s |
 | 5,001,002 | 407.533 s | 33.517 s |
 
-The completion observers use different implementation contracts. This table records both diagnostic boundaries but does not treat them as a common metric or compute a cross-target ratio.
+The completion observers use different implementation contracts, so no cross-target ratio is computed from this table.
 
 ## Correctness gates
 

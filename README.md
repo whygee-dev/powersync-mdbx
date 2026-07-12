@@ -33,7 +33,7 @@ Out of scope:
 - upload or CRUD APIs;
 - partial-sync priority and full subscription-correlation semantics.
 
-Unsupported layout-changing rule activation, publication transformations, and `TRUNCATE` fail closed. The full boundary is documented in [scope](docs/scope.md), [correctness](docs/correctness.md), and [security](SECURITY.md).
+Unsupported layout-changing rule activation, publication transformations, and `TRUNCATE` fail closed. Publication coverage is validated at each bootstrap, not continuously; a publication altered while the service is streaming is rejected at the next restart. The full boundary is documented in [scope](docs/scope.md), [correctness](docs/correctness.md), and [security](SECURITY.md).
 
 Deleting the complete state directory outside the managed reset path also deletes cursor-epoch history; clients must discard saved cursors after that operator action. Parameter queries are concurrency-, time-, and row-bounded but currently open one PostgreSQL connection per evaluation rather than using a pool.
 
@@ -79,9 +79,9 @@ Memory values are cgroup lifetime peaks, so MongoDB includes provisioning before
 
 The canary took 18 minutes 44 seconds and retained about 13 GiB locally. It ran in Docker Desktop's Linux VM rather than on controlled native Linux hardware. Official, MongoDB, and PostgreSQL images were digest-pinned; the locally built Rust image was executed and recorded by immutable image ID. A repeated, counterbalanced native-Linux matrix remains the appropriate next step for distributional performance claims.
 
-Local release checks passed 245 Rust tests, six live PostgreSQL replication tests, and 67 Node harness/export/ladder tests, along with formatting, warnings-denied Clippy, dependency audits, and the frontend build.
+Local release checks passed 245 Rust tests, six live PostgreSQL replication tests, and 69 Node harness/export/ladder tests, along with formatting, warnings-denied Clippy, dependency audits, and the frontend build.
 
-The other compact artifacts under `docs/artifacts/` are older exploratory runs from asymmetric topologies and earlier implementation revisions. See the [benchmark methodology](docs/benchmark.md) before quoting any result.
+The other compact artifacts under `docs/artifacts/` are older exploratory runs from asymmetric topologies and earlier implementation revisions. The [benchmark methodology](docs/benchmark.md) defines the claim boundary for each result.
 
 ## Build and test
 
@@ -180,7 +180,7 @@ The current harness records three initial-replication boundaries concurrently:
 2. target-specific evidence of complete initial source materialization through the fixture LSN;
 3. the replication slot's `confirmed_flush_lsn` reaching that LSN.
 
-The first is the common client-visible timing. The second is implementation-specific and must not be presented as a common protocol metric. The official service reports an explicit completion flag and LSN; Rust exposes the LSN persisted atomically with its internal snapshot-complete marker, so completion is inferred from that implementation contract. The third records a source slot position, not a consumer acknowledgement or proof that every bucket is materialized.
+The first is the common client-visible timing. The second is a target-specific diagnostic, not a common protocol metric. The official service reports an explicit completion flag and LSN; Rust exposes the LSN persisted atomically with its internal snapshot-complete marker, so completion is inferred from that implementation contract. The third records a source slot position, not a consumer acknowledgement or proof that every bucket is materialized.
 
 Each repeat also records per-component CPU, cgroup lifetime peak memory, container init-process lifetime peak RSS, block I/O, network traffic, logical and allocated storage growth, and the cluster-wide inserted WAL-position delta. These high-water marks are lifetime diagnostics, not measurement-window peaks; MongoDB can include provisioning before the baseline. The runner reads container cgroup v2 and `/proc` counters directly, using `docker exec` when the Docker host is not local. Docker stats remains an incomplete fallback. Component network counters are not summed because service-to-storage traffic appears in more than one namespace.
 

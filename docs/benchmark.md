@@ -4,7 +4,7 @@
 
 The harness measures initial replication and deterministic churn for one generated workload and a constrained set of client-visible fields. It does not exercise unsupported protocol/rule forms, failover, backup/restore, rolling upgrades, or mixed read/write workloads, and it cannot isolate the effect of one language, storage engine, or architectural choice.
 
-The checked-in `100k-auth-perimeter`, `1m-auth-perimeter`, and `1m-parity-gated` data is historical and exploratory. Those runs predate the current correctness and security changes, do not identify a Git commit, and used different deployment topologies for the official and Rust targets. They are not evidence of current-tree performance. The current [symmetric scale canary](artifacts/symmetric-canary/README.md) identifies its commit, compares PowerSync 1.23.3 with the Rust implementation in a symmetric container topology, and records initial CPU, peak memory, block I/O, per-component network traffic, storage growth, and WAL. It supports the four observed common protocol-readiness ratios for that workload and configuration. The official allocation was selected by the local calibration harness and was not reviewed by the PowerSync team. One ordered pair per rung does not estimate a performance distribution or tail latency and cannot isolate the contribution of any one component.
+The checked-in `100k-auth-perimeter`, `1m-auth-perimeter`, and `1m-parity-gated` data is historical and exploratory. Those runs predate the current correctness and security changes, do not identify a Git commit, and used different deployment topologies for the official and Rust targets. They are not evidence of current-tree performance. The current [symmetric scale canary](artifacts/symmetric-canary/README.md) identifies its commit, compares PowerSync 1.23.3 with the Rust implementation in a symmetric container topology, and records initial CPU, peak memory, block I/O, per-component network traffic, storage growth, and WAL. It supports the four observed common protocol-readiness ratios for that workload and configuration. The official allocation was selected by the local calibration harness and was not reviewed by the PowerSync team. One ordered pair per rung does not estimate a performance distribution or tail latency.
 
 ## Historical topology and current timing controls
 
@@ -22,7 +22,7 @@ Fresh runs can set `POWERSYNC_USER_VALUE_INITIAL_READINESS=sync-protocol`. The h
 
 In `auth_perimeter` mode the fixture adds one access row for the dedicated `user-benchmark-readiness-probe` identity and project 1; its JWT can resolve exactly that bucket. In subscription mode the probe subscribes directly to project 1. The probe specification is built before the clock and scales with rows in one project, not total fixture rows. The first boundary is the headline client-visible timing. The other two are reported separately and must not be conflated with it. The default `target-specific` mode exists for diagnosis and is not a publication boundary.
 
-In the historical checked-in runs, the Rust replication slot was created before the measured service start while the official service created its slot during startup. The current harness provisions each target's publication with the fixture before timing, but no longer pre-creates Rust's slot; both slots are now created after the measured start boundary. This correction is another reason the historical timings cannot describe the current harness.
+In the historical checked-in runs, the Rust replication slot was created before the measured service start while the official service created its slot during startup. The current harness provisions each target's publication with the fixture before timing, but no longer pre-creates Rust's slot; both slots are now created after the measured start boundary.
 
 Target stores are empty at the start of a repeat. OS and PostgreSQL caches are not flushed or otherwise controlled.
 
@@ -72,7 +72,7 @@ The `100k-auth-perimeter` and `1m-auth-perimeter` runs used one unrecorded warmu
 
 The table reports ratios of medians, not paired-repeat speedups. The five samples show the recorded run-to-run spread but do not estimate tail latency. Retained per-target timing p95 fields are traceability data, not SLO estimates.
 
-The older `1m-parity-gated` artifact is a historical, single-sample subscription-parameter run. It is not comparable to the later auth-perimeter runs and should not be used as supporting evidence.
+The older `1m-parity-gated` artifact is a single-sample subscription-parameter run from the earlier topology, retained as development history; the auth-perimeter runs supersede it.
 
 ## Artifact limits
 
