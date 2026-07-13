@@ -53,7 +53,7 @@ The fixture contains tasks, projects, organizations, memberships, comments, and,
 
 The auth-perimeter subscription derives project ids from `auth.user_id()` through `user_project_access`. A separate no-access JWT probe supplies a valid project id through client-controlled parameters and must receive no checkpoint or data buckets.
 
-The checked-in symmetric canary predates parameter-lookup materialization: its recorded runs evaluated this `user_project_access` lookup against the source PostgreSQL database at request time. The current tree materializes parameter lookups from the replication stream during ingestion and resolves them with in-process MDBX reads at request time, as the official service does.
+Both targets resolve the `user_project_access` lookup from their own materialized stores at request time: the official service from MongoDB, and Rust from parameter-lookup entries materialized into MDBX during ingestion. Neither target opens a PostgreSQL connection on the `/sync/stream` path.
 
 The retained historical artifacts do not identify their issuer-validation policy, so the spoof probe is evidence about routing authorization only, not parity of the products' complete JWT validation policies. The current harness supplies audience and issuer claims, configures audience validation on both targets and issuer validation on Rust, and records that asymmetry in fresh results.
 

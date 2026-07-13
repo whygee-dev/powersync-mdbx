@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "gitCommit": "c43e1ce963d737dda25f883661531e58f98f6535",
-  "rustImageId": "sha256:59dbb72b5fd08be16508824869fbc7200c15af22a18d9554ddc89cc11ac23804",
+  "gitCommit": "f56050bb7c9098b9e3f5f84806f802fa512b7ea8",
+  "rustImageId": "sha256:2e2f3663c88832a3f91e7c428feb9431d7228379876794395d5024fc4283c637",
   "dockerServer": "os=linux arch=aarch64 cpus=6 memory=16748593152",
   "status": "passed",
   "methodology": {
@@ -18,7 +18,7 @@
       "profile": "250k",
       "sourceTaskRows": 250202,
       "routedBucketSamples": 200,
-      "elapsedMs": 57089,
+      "elapsedMs": 57688,
       "targetResources": {
         "cpus": 4,
         "memory": "8g",
@@ -58,7 +58,7 @@
         "official": "journeyapps/powersync-service@sha256:b6b22fa7d0d862f04bdff62846e656756d17bcf3dd6eca399a0633671051438b",
         "mongo": "mongo@sha256:d5b3ca8c3f3cdce78d44870dc0871b76d5235e9b2ad4ea6bea5d1fbff8027703",
         "postgres": "postgres@sha256:be01cf82fc7dbba824acf0a82e150b4b360f3ff93c6631d7844af431e841a95c",
-        "rust": "sha256:59dbb72b5fd08be16508824869fbc7200c15af22a18d9554ddc89cc11ac23804"
+        "rust": "sha256:2e2f3663c88832a3f91e7c428feb9431d7228379876794395d5024fc4283c637"
       },
       "rawValidationRecordsRetained": true,
       "executionSchedule": [
@@ -74,15 +74,15 @@
         }
       ],
       "official": {
-        "protocolReadinessMs": 19261.633,
+        "protocolReadinessMs": 20464.624,
         "completeMaterialization": {
           "completionBoundary": "official-diagnostics-initial-replication-lsn",
-          "processingMs": 18769.185,
+          "processingMs": 19712.299,
           "targetLsn": "0/92AE7B8"
         },
         "sourceSlotPosition": {
           "method": "replication-slot-confirmed-flush-lsn",
-          "processingMs": 1571.924,
+          "processingMs": 1812.668,
           "targetLsn": "0/92AE7B8",
           "confirmed_flush_lsn": "0/92AE7F0"
         },
@@ -90,38 +90,38 @@
         "resources": {
           "status": "captured",
           "initial": {
-            "durationMs": 19672,
-            "walInsertedBytes": 553112,
+            "durationMs": 20916,
+            "walInsertedBytes": 553168,
             "components": {
               "service": {
                 "status": "captured",
                 "source": "linux-cgroup-v2",
                 "access": "docker-exec",
-                "cpuSeconds": 14.640708,
-                "cgroupLifetimePeakMemoryBytes": 264499200,
-                "mainProcessLifetimePeakRssBytes": 303742976,
-                "blockReadBytes": 892928,
+                "cpuSeconds": 15.227508,
+                "cgroupLifetimePeakMemoryBytes": 253403136,
+                "mainProcessLifetimePeakRssBytes": 292372480,
+                "blockReadBytes": 0,
                 "blockWriteBytes": 0,
-                "networkRxBytes": 89272628,
-                "networkTxBytes": 498934175
+                "networkRxBytes": 89294555,
+                "networkTxBytes": 498945571
               },
               "mongo": {
                 "status": "captured",
                 "source": "linux-cgroup-v2",
                 "access": "docker-exec",
-                "cpuSeconds": 8.17912,
-                "cgroupLifetimePeakMemoryBytes": 1580822528,
-                "mainProcessLifetimePeakRssBytes": 1397551104,
+                "cpuSeconds": 9.129645,
+                "cgroupLifetimePeakMemoryBytes": 1646739456,
+                "mainProcessLifetimePeakRssBytes": 1464692736,
                 "blockReadBytes": 0,
                 "blockWriteBytes": 0,
-                "networkRxBytes": 498412767,
-                "networkTxBytes": 20955558
+                "networkRxBytes": 498418147,
+                "networkTxBytes": 20968008
               }
             },
             "storageGrowth": {
               "mongo-db": {
-                "logicalBytes": 173248454,
-                "allocatedBytes": 183308288,
+                "logicalBytes": 170401710,
+                "allocatedBytes": 180031488,
                 "files": 40
               },
               "mongo-config": {
@@ -132,38 +132,38 @@
             }
           },
           "total": {
-            "durationMs": 29949,
-            "walInsertedBytes": 3003232,
+            "durationMs": 31212,
+            "walInsertedBytes": 3003288,
             "components": {
               "service": {
                 "status": "captured",
                 "source": "linux-cgroup-v2",
                 "access": "docker-exec",
-                "cpuSeconds": 16.105925,
-                "cgroupLifetimePeakMemoryBytes": 280035328,
-                "mainProcessLifetimePeakRssBytes": 320413696,
-                "blockReadBytes": 892928,
+                "cpuSeconds": 16.628452,
+                "cgroupLifetimePeakMemoryBytes": 266485760,
+                "mainProcessLifetimePeakRssBytes": 306511872,
+                "blockReadBytes": 0,
                 "blockWriteBytes": 0,
-                "networkRxBytes": 159091333,
-                "networkTxBytes": 573682453
+                "networkRxBytes": 159117917,
+                "networkTxBytes": 573695367
               },
               "mongo": {
                 "status": "captured",
                 "source": "linux-cgroup-v2",
                 "access": "docker-exec",
-                "cpuSeconds": 9.215203,
-                "cgroupLifetimePeakMemoryBytes": 1602449408,
-                "mainProcessLifetimePeakRssBytes": 1418166272,
+                "cpuSeconds": 10.082441,
+                "cgroupLifetimePeakMemoryBytes": 1661415424,
+                "mainProcessLifetimePeakRssBytes": 1474908160,
                 "blockReadBytes": 0,
                 "blockWriteBytes": 0,
-                "networkRxBytes": 512854661,
-                "networkTxBytes": 89163115
+                "networkRxBytes": 512859525,
+                "networkTxBytes": 89178067
               }
             },
             "storageGrowth": {
               "mongo-db": {
-                "logicalBytes": 174478097,
-                "allocatedBytes": 184360960,
+                "logicalBytes": 173511153,
+                "allocatedBytes": 182231040,
                 "files": 40
               },
               "mongo-config": {
@@ -188,36 +188,36 @@
         }
       },
       "rust": {
-        "protocolReadinessMs": 2080.123,
+        "protocolReadinessMs": 1743.175,
         "completeMaterialization": {
           "completionBoundary": "rust-persisted-initial-snapshot-lsn",
-          "processingMs": 1987.407,
-          "targetLsn": "0/10F00A10"
+          "processingMs": 1768.196,
+          "targetLsn": "0/10F00A48"
         },
         "sourceSlotPosition": {
           "method": "replication-slot-confirmed-flush-lsn",
-          "processingMs": 633.689,
-          "targetLsn": "0/10F00A10",
-          "confirmed_flush_lsn": "0/10F00A48"
+          "processingMs": 286.093,
+          "targetLsn": "0/10F00A48",
+          "confirmed_flush_lsn": "0/10F00A80"
         },
         "resourceEvidenceStatus": "captured",
         "resources": {
           "status": "captured",
           "initial": {
-            "durationMs": 2172,
-            "walInsertedBytes": 448,
+            "durationMs": 1857,
+            "walInsertedBytes": 278832,
             "components": {
               "service": {
                 "status": "captured",
                 "source": "linux-cgroup-v2",
                 "access": "docker-exec",
-                "cpuSeconds": 1.388493,
-                "cgroupLifetimePeakMemoryBytes": 79912960,
-                "mainProcessLifetimePeakRssBytes": 71237632,
-                "blockReadBytes": 471040,
+                "cpuSeconds": 1.265592,
+                "cgroupLifetimePeakMemoryBytes": 83730432,
+                "mainProcessLifetimePeakRssBytes": 74498048,
+                "blockReadBytes": 0,
                 "blockWriteBytes": 0,
-                "networkRxBytes": 68094577,
-                "networkTxBytes": 397233
+                "networkRxBytes": 68117657,
+                "networkTxBytes": 390853
               }
             },
             "storageGrowth": {
@@ -229,20 +229,20 @@
             }
           },
           "total": {
-            "durationMs": 7575,
+            "durationMs": 7054,
             "walInsertedBytes": 2728968,
             "components": {
               "service": {
                 "status": "captured",
                 "source": "linux-cgroup-v2",
                 "access": "docker-exec",
-                "cpuSeconds": 2.420638,
-                "cgroupLifetimePeakMemoryBytes": 264970240,
-                "mainProcessLifetimePeakRssBytes": 262316032,
-                "blockReadBytes": 471040,
+                "cpuSeconds": 2.330546,
+                "cgroupLifetimePeakMemoryBytes": 265793536,
+                "mainProcessLifetimePeakRssBytes": 262467584,
+                "blockReadBytes": 0,
                 "blockWriteBytes": 0,
-                "networkRxBytes": 69961581,
-                "networkTxBytes": 58856809
+                "networkRxBytes": 69951289,
+                "networkTxBytes": 58803072
               }
             },
             "storageGrowth": {
@@ -272,7 +272,7 @@
       "profile": "1m",
       "sourceTaskRows": 1000402,
       "routedBucketSamples": 100,
-      "elapsedMs": 146739,
+      "elapsedMs": 125338,
       "targetResources": {
         "cpus": 4,
         "memory": "8g",
@@ -312,7 +312,7 @@
         "official": "journeyapps/powersync-service@sha256:b6b22fa7d0d862f04bdff62846e656756d17bcf3dd6eca399a0633671051438b",
         "mongo": "mongo@sha256:d5b3ca8c3f3cdce78d44870dc0871b76d5235e9b2ad4ea6bea5d1fbff8027703",
         "postgres": "postgres@sha256:be01cf82fc7dbba824acf0a82e150b4b360f3ff93c6631d7844af431e841a95c",
-        "rust": "sha256:59dbb72b5fd08be16508824869fbc7200c15af22a18d9554ddc89cc11ac23804"
+        "rust": "sha256:2e2f3663c88832a3f91e7c428feb9431d7228379876794395d5024fc4283c637"
       },
       "rawValidationRecordsRetained": true,
       "executionSchedule": [
@@ -328,15 +328,15 @@
         }
       ],
       "official": {
-        "protocolReadinessMs": 81064.549,
+        "protocolReadinessMs": 63556.316,
         "completeMaterialization": {
           "completionBoundary": "official-diagnostics-initial-replication-lsn",
-          "processingMs": 80723.3,
+          "processingMs": 62822.03,
           "targetLsn": "0/1FDFD1C0"
         },
         "sourceSlotPosition": {
           "method": "replication-slot-confirmed-flush-lsn",
-          "processingMs": 1656.381,
+          "processingMs": 1491.966,
           "targetLsn": "0/1FDFD1C0",
           "confirmed_flush_lsn": "0/1FDFD1F8"
         },
@@ -344,38 +344,38 @@
         "resources": {
           "status": "captured",
           "initial": {
-            "durationMs": 81522,
-            "walInsertedBytes": 2385720,
+            "durationMs": 64025,
+            "walInsertedBytes": 2385504,
             "components": {
               "service": {
                 "status": "captured",
                 "source": "linux-cgroup-v2",
                 "access": "docker-exec",
-                "cpuSeconds": 58.717894,
-                "cgroupLifetimePeakMemoryBytes": 275914752,
-                "mainProcessLifetimePeakRssBytes": 310194176,
-                "blockReadBytes": 5423104,
+                "cpuSeconds": 45.387646,
+                "cgroupLifetimePeakMemoryBytes": 269500416,
+                "mainProcessLifetimePeakRssBytes": 308080640,
+                "blockReadBytes": 0,
                 "blockWriteBytes": 0,
-                "networkRxBytes": 355896668,
-                "networkTxBytes": 1997526816
+                "networkRxBytes": 355909922,
+                "networkTxBytes": 1995358032
               },
               "mongo": {
                 "status": "captured",
                 "source": "linux-cgroup-v2",
                 "access": "docker-exec",
-                "cpuSeconds": 44.745076,
-                "cgroupLifetimePeakMemoryBytes": 2858323968,
-                "mainProcessLifetimePeakRssBytes": 2083745792,
-                "blockReadBytes": 12288,
+                "cpuSeconds": 31.228072,
+                "cgroupLifetimePeakMemoryBytes": 2823815168,
+                "mainProcessLifetimePeakRssBytes": 2068779008,
+                "blockReadBytes": 0,
                 "blockWriteBytes": 0,
-                "networkRxBytes": 1996086502,
-                "networkTxBytes": 82614415
+                "networkRxBytes": 1994034036,
+                "networkTxBytes": 82610581
               }
             },
             "storageGrowth": {
               "mongo-db": {
-                "logicalBytes": 742050285,
-                "allocatedBytes": 765370368,
+                "logicalBytes": 716645753,
+                "allocatedBytes": 737669120,
                 "files": 40
               },
               "mongo-config": {
@@ -386,38 +386,38 @@
             }
           },
           "total": {
-            "durationMs": 91996,
-            "walInsertedBytes": 3611904,
+            "durationMs": 74104,
+            "walInsertedBytes": 3610792,
             "components": {
               "service": {
                 "status": "captured",
                 "source": "linux-cgroup-v2",
                 "access": "docker-exec",
-                "cpuSeconds": 59.846951,
-                "cgroupLifetimePeakMemoryBytes": 296865792,
-                "mainProcessLifetimePeakRssBytes": 332533760,
-                "blockReadBytes": 5423104,
+                "cpuSeconds": 46.435619,
+                "cgroupLifetimePeakMemoryBytes": 289181696,
+                "mainProcessLifetimePeakRssBytes": 328712192,
+                "blockReadBytes": 0,
                 "blockWriteBytes": 0,
-                "networkRxBytes": 420991585,
-                "networkTxBytes": 2063524580
+                "networkRxBytes": 420994430,
+                "networkTxBytes": 2061360703
               },
               "mongo": {
                 "status": "captured",
                 "source": "linux-cgroup-v2",
                 "access": "docker-exec",
-                "cpuSeconds": 45.497359,
-                "cgroupLifetimePeakMemoryBytes": 2861473792,
-                "mainProcessLifetimePeakRssBytes": 2083520512,
-                "blockReadBytes": 12288,
+                "cpuSeconds": 31.946885,
+                "cgroupLifetimePeakMemoryBytes": 2838528000,
+                "mainProcessLifetimePeakRssBytes": 2069225472,
+                "blockReadBytes": 0,
                 "blockWriteBytes": 0,
-                "networkRxBytes": 2003223715,
-                "networkTxBytes": 146872435
+                "networkRxBytes": 2001176656,
+                "networkTxBytes": 146861944
               }
             },
             "storageGrowth": {
               "mongo-db": {
-                "logicalBytes": 744390033,
-                "allocatedBytes": 766423040,
+                "logicalBytes": 729776503,
+                "allocatedBytes": 748158976,
                 "files": 40
               },
               "mongo-config": {
@@ -442,36 +442,36 @@
         }
       },
       "rust": {
-        "protocolReadinessMs": 7223.196,
+        "protocolReadinessMs": 5870.307,
         "completeMaterialization": {
           "completionBoundary": "rust-persisted-initial-snapshot-lsn",
-          "processingMs": 6522.252,
-          "targetLsn": "0/3E6943A0"
+          "processingMs": 5760.651,
+          "targetLsn": "0/3E6B6070"
         },
         "sourceSlotPosition": {
           "method": "replication-slot-confirmed-flush-lsn",
-          "processingMs": 622.13,
-          "targetLsn": "0/3E6943A0",
-          "confirmed_flush_lsn": "0/3E6943D8"
+          "processingMs": 381.841,
+          "targetLsn": "0/3E6B6070",
+          "confirmed_flush_lsn": "0/3E6B60A8"
         },
         "resourceEvidenceStatus": "captured",
         "resources": {
           "status": "captured",
           "initial": {
-            "durationMs": 7318,
-            "walInsertedBytes": 27240,
+            "durationMs": 5954,
+            "walInsertedBytes": 27296,
             "components": {
               "service": {
                 "status": "captured",
                 "source": "linux-cgroup-v2",
                 "access": "docker-exec",
-                "cpuSeconds": 4.712318,
-                "cgroupLifetimePeakMemoryBytes": 89145344,
-                "mainProcessLifetimePeakRssBytes": 67395584,
-                "blockReadBytes": 471040,
+                "cpuSeconds": 4.14665,
+                "cgroupLifetimePeakMemoryBytes": 80232448,
+                "mainProcessLifetimePeakRssBytes": 69881856,
+                "blockReadBytes": 0,
                 "blockWriteBytes": 0,
-                "networkRxBytes": 272480098,
-                "networkTxBytes": 1003158
+                "networkRxBytes": 272345889,
+                "networkTxBytes": 883674
               }
             },
             "storageGrowth": {
@@ -483,20 +483,20 @@
             }
           },
           "total": {
-            "durationMs": 14179,
+            "durationMs": 12498,
             "walInsertedBytes": 1394336,
             "components": {
               "service": {
                 "status": "captured",
                 "source": "linux-cgroup-v2",
                 "access": "docker-exec",
-                "cpuSeconds": 5.712533,
-                "cgroupLifetimePeakMemoryBytes": 248983552,
-                "mainProcessLifetimePeakRssBytes": 252047360,
-                "blockReadBytes": 471040,
+                "cpuSeconds": 4.984681,
+                "cgroupLifetimePeakMemoryBytes": 253206528,
+                "mainProcessLifetimePeakRssBytes": 251588608,
+                "blockReadBytes": 0,
                 "blockWriteBytes": 0,
-                "networkRxBytes": 273436730,
-                "networkTxBytes": 57949505
+                "networkRxBytes": 273309975,
+                "networkTxBytes": 57845763
               }
             },
             "storageGrowth": {
@@ -526,7 +526,7 @@
       "profile": "2m",
       "sourceTaskRows": 2000802,
       "routedBucketSamples": 100,
-      "elapsedMs": 268281,
+      "elapsedMs": 246140,
       "targetResources": {
         "cpus": 4,
         "memory": "8g",
@@ -566,7 +566,7 @@
         "official": "journeyapps/powersync-service@sha256:b6b22fa7d0d862f04bdff62846e656756d17bcf3dd6eca399a0633671051438b",
         "mongo": "mongo@sha256:d5b3ca8c3f3cdce78d44870dc0871b76d5235e9b2ad4ea6bea5d1fbff8027703",
         "postgres": "postgres@sha256:be01cf82fc7dbba824acf0a82e150b4b360f3ff93c6631d7844af431e841a95c",
-        "rust": "sha256:59dbb72b5fd08be16508824869fbc7200c15af22a18d9554ddc89cc11ac23804"
+        "rust": "sha256:2e2f3663c88832a3f91e7c428feb9431d7228379876794395d5024fc4283c637"
       },
       "rawValidationRecordsRetained": true,
       "executionSchedule": [
@@ -582,55 +582,55 @@
         }
       ],
       "official": {
-        "protocolReadinessMs": 163499.099,
+        "protocolReadinessMs": 146060.552,
         "completeMaterialization": {
           "completionBoundary": "official-diagnostics-initial-replication-lsn",
-          "processingMs": 163090.157,
-          "targetLsn": "0/3E89C000"
+          "processingMs": 145119.891,
+          "targetLsn": "0/3E830000"
         },
         "sourceSlotPosition": {
           "method": "replication-slot-confirmed-flush-lsn",
-          "processingMs": 2154.215,
-          "targetLsn": "0/3E89C000",
-          "confirmed_flush_lsn": "0/3E910770"
+          "processingMs": 2060.601,
+          "targetLsn": "0/3E830000",
+          "confirmed_flush_lsn": "0/3E8A22C8"
         },
         "resourceEvidenceStatus": "captured",
         "resources": {
           "status": "captured",
           "initial": {
-            "durationMs": 163954,
-            "walInsertedBytes": 3154160,
+            "durationMs": 146534,
+            "walInsertedBytes": 3580448,
             "components": {
               "service": {
                 "status": "captured",
                 "source": "linux-cgroup-v2",
                 "access": "docker-exec",
-                "cpuSeconds": 111.852769,
-                "cgroupLifetimePeakMemoryBytes": 275279872,
-                "mainProcessLifetimePeakRssBytes": 305819648,
-                "blockReadBytes": 13357056,
+                "cpuSeconds": 103.835658,
+                "cgroupLifetimePeakMemoryBytes": 270897152,
+                "mainProcessLifetimePeakRssBytes": 309100544,
+                "blockReadBytes": 24576,
                 "blockWriteBytes": 0,
-                "networkRxBytes": 712433585,
-                "networkTxBytes": 3999696156
+                "networkRxBytes": 712253172,
+                "networkTxBytes": 3997461310
               },
               "mongo": {
                 "status": "captured",
                 "source": "linux-cgroup-v2",
                 "access": "docker-exec",
-                "cpuSeconds": 97.865569,
-                "cgroupLifetimePeakMemoryBytes": 3670716416,
-                "mainProcessLifetimePeakRssBytes": 2226327552,
-                "blockReadBytes": 40960,
+                "cpuSeconds": 83.456392,
+                "cgroupLifetimePeakMemoryBytes": 3843493888,
+                "mainProcessLifetimePeakRssBytes": 2299187200,
+                "blockReadBytes": 16384,
                 "blockWriteBytes": 0,
-                "networkRxBytes": 3997413956,
-                "networkTxBytes": 164754946
+                "networkRxBytes": 3995313478,
+                "networkTxBytes": 164832387
               }
             },
             "storageGrowth": {
               "mongo-db": {
-                "logicalBytes": 1593289470,
-                "allocatedBytes": 1617592320,
-                "files": 41
+                "logicalBytes": 1499896465,
+                "allocatedBytes": 1529692160,
+                "files": 40
               },
               "mongo-config": {
                 "logicalBytes": 0,
@@ -640,39 +640,39 @@
             }
           },
           "total": {
-            "durationMs": 174263,
-            "walInsertedBytes": 5594544,
+            "durationMs": 156527,
+            "walInsertedBytes": 6020832,
             "components": {
               "service": {
                 "status": "captured",
                 "source": "linux-cgroup-v2",
                 "access": "docker-exec",
-                "cpuSeconds": 113.105386,
-                "cgroupLifetimePeakMemoryBytes": 285917184,
-                "mainProcessLifetimePeakRssBytes": 325832704,
-                "blockReadBytes": 13357056,
+                "cpuSeconds": 105.259443,
+                "cgroupLifetimePeakMemoryBytes": 288559104,
+                "mainProcessLifetimePeakRssBytes": 326705152,
+                "blockReadBytes": 24576,
                 "blockWriteBytes": 0,
-                "networkRxBytes": 777546948,
-                "networkTxBytes": 4065786488
+                "networkRxBytes": 777406412,
+                "networkTxBytes": 4063556481
               },
               "mongo": {
                 "status": "captured",
                 "source": "linux-cgroup-v2",
                 "access": "docker-exec",
-                "cpuSeconds": 99.007118,
-                "cgroupLifetimePeakMemoryBytes": 3670716416,
-                "mainProcessLifetimePeakRssBytes": 2226450432,
-                "blockReadBytes": 40960,
+                "cpuSeconds": 84.292246,
+                "cgroupLifetimePeakMemoryBytes": 3844603904,
+                "mainProcessLifetimePeakRssBytes": 2299187200,
+                "blockReadBytes": 16384,
                 "blockWriteBytes": 0,
-                "networkRxBytes": 4004549580,
-                "networkTxBytes": 229062498
+                "networkRxBytes": 4002456283,
+                "networkTxBytes": 229145429
               }
             },
             "storageGrowth": {
               "mongo-db": {
-                "logicalBytes": 1597912689,
-                "allocatedBytes": 1634373632,
-                "files": 41
+                "logicalBytes": 1500411571,
+                "allocatedBytes": 1529696256,
+                "files": 40
               },
               "mongo-config": {
                 "logicalBytes": 0,
@@ -696,36 +696,36 @@
         }
       },
       "rust": {
-        "protocolReadinessMs": 13471.143,
+        "protocolReadinessMs": 12241.757,
         "completeMaterialization": {
           "completionBoundary": "rust-persisted-initial-snapshot-lsn",
-          "processingMs": 12614.983,
-          "targetLsn": "0/7BC76A08"
+          "processingMs": 11993.334,
+          "targetLsn": "0/7BE9CC58"
         },
         "sourceSlotPosition": {
           "method": "replication-slot-confirmed-flush-lsn",
-          "processingMs": 923.24,
-          "targetLsn": "0/7BC76A08",
-          "confirmed_flush_lsn": "0/7BC76A40"
+          "processingMs": 676.306,
+          "targetLsn": "0/7BE9CC58",
+          "confirmed_flush_lsn": "0/7BE9CC90"
         },
         "resourceEvidenceStatus": "captured",
         "resources": {
           "status": "captured",
           "initial": {
-            "durationMs": 13564,
-            "walInsertedBytes": 27296,
+            "durationMs": 12341,
+            "walInsertedBytes": 347296,
             "components": {
               "service": {
                 "status": "captured",
                 "source": "linux-cgroup-v2",
                 "access": "docker-exec",
-                "cpuSeconds": 8.855698,
-                "cgroupLifetimePeakMemoryBytes": 102395904,
-                "mainProcessLifetimePeakRssBytes": 74035200,
-                "blockReadBytes": 13250560,
+                "cpuSeconds": 8.71203,
+                "cgroupLifetimePeakMemoryBytes": 85635072,
+                "mainProcessLifetimePeakRssBytes": 70418432,
+                "blockReadBytes": 471040,
                 "blockWriteBytes": 0,
-                "networkRxBytes": 545892504,
-                "networkTxBytes": 1236479
+                "networkRxBytes": 545711061,
+                "networkTxBytes": 1120787
               }
             },
             "storageGrowth": {
@@ -737,20 +737,20 @@
             }
           },
           "total": {
-            "durationMs": 22088,
-            "walInsertedBytes": 2684040,
+            "durationMs": 20819,
+            "walInsertedBytes": 3004160,
             "components": {
               "service": {
                 "status": "captured",
                 "source": "linux-cgroup-v2",
                 "access": "docker-exec",
-                "cpuSeconds": 9.742928,
-                "cgroupLifetimePeakMemoryBytes": 276848640,
-                "mainProcessLifetimePeakRssBytes": 255496192,
-                "blockReadBytes": 13250560,
+                "cpuSeconds": 9.596396,
+                "cgroupLifetimePeakMemoryBytes": 257384448,
+                "mainProcessLifetimePeakRssBytes": 249987072,
+                "blockReadBytes": 471040,
                 "blockWriteBytes": 0,
-                "networkRxBytes": 546840870,
-                "networkTxBytes": 58243593
+                "networkRxBytes": 546652715,
+                "networkTxBytes": 58125625
               }
             },
             "storageGrowth": {
@@ -780,7 +780,7 @@
       "profile": "5m",
       "sourceTaskRows": 5001002,
       "routedBucketSamples": 50,
-      "elapsedMs": 651605,
+      "elapsedMs": 582696,
       "targetResources": {
         "cpus": 4,
         "memory": "8g",
@@ -820,7 +820,7 @@
         "official": "journeyapps/powersync-service@sha256:b6b22fa7d0d862f04bdff62846e656756d17bcf3dd6eca399a0633671051438b",
         "mongo": "mongo@sha256:d5b3ca8c3f3cdce78d44870dc0871b76d5235e9b2ad4ea6bea5d1fbff8027703",
         "postgres": "postgres@sha256:be01cf82fc7dbba824acf0a82e150b4b360f3ff93c6631d7844af431e841a95c",
-        "rust": "sha256:59dbb72b5fd08be16508824869fbc7200c15af22a18d9554ddc89cc11ac23804"
+        "rust": "sha256:2e2f3663c88832a3f91e7c428feb9431d7228379876794395d5024fc4283c637"
       },
       "rawValidationRecordsRetained": true,
       "executionSchedule": [
@@ -836,55 +836,55 @@
         }
       ],
       "official": {
-        "protocolReadinessMs": 407988.473,
+        "protocolReadinessMs": 356867.413,
         "completeMaterialization": {
           "completionBoundary": "official-diagnostics-initial-replication-lsn",
-          "processingMs": 407532.774,
-          "targetLsn": "0/99722B20"
+          "processingMs": 356048.983,
+          "targetLsn": "0/997F10B0"
         },
         "sourceSlotPosition": {
           "method": "replication-slot-confirmed-flush-lsn",
-          "processingMs": 2169.719,
-          "targetLsn": "0/99722B20",
-          "confirmed_flush_lsn": "0/99722B58"
+          "processingMs": 1969.373,
+          "targetLsn": "0/997F10B0",
+          "confirmed_flush_lsn": "0/997F10E8"
         },
         "resourceEvidenceStatus": "captured",
         "resources": {
           "status": "captured",
           "initial": {
-            "durationMs": 408492,
-            "walInsertedBytes": 7000880,
+            "durationMs": 357373,
+            "walInsertedBytes": 6166152,
             "components": {
               "service": {
                 "status": "captured",
                 "source": "linux-cgroup-v2",
                 "access": "docker-exec",
-                "cpuSeconds": 275.111295,
-                "cgroupLifetimePeakMemoryBytes": 288788480,
-                "mainProcessLifetimePeakRssBytes": 321007616,
-                "blockReadBytes": 19959808,
+                "cpuSeconds": 241.651424,
+                "cgroupLifetimePeakMemoryBytes": 287768576,
+                "mainProcessLifetimePeakRssBytes": 312246272,
+                "blockReadBytes": 14917632,
                 "blockWriteBytes": 0,
-                "networkRxBytes": 1782946238,
-                "networkTxBytes": 10000336513
+                "networkRxBytes": 1782097485,
+                "networkTxBytes": 9997662648
               },
               "mongo": {
                 "status": "captured",
                 "source": "linux-cgroup-v2",
                 "access": "docker-exec",
-                "cpuSeconds": 296.582474,
-                "cgroupLifetimePeakMemoryBytes": 4573982720,
-                "mainProcessLifetimePeakRssBytes": 2417577984,
-                "blockReadBytes": 548864,
+                "cpuSeconds": 248.499834,
+                "cgroupLifetimePeakMemoryBytes": 6209921024,
+                "mainProcessLifetimePeakRssBytes": 2443444224,
+                "blockReadBytes": 32768,
                 "blockWriteBytes": 0,
-                "networkRxBytes": 9994929017,
-                "networkTxBytes": 410786033
+                "networkRxBytes": 9992590997,
+                "networkTxBytes": 410416866
               }
             },
             "storageGrowth": {
               "mongo-db": {
-                "logicalBytes": 3741737633,
-                "allocatedBytes": 3780300800,
-                "files": 43
+                "logicalBytes": 3848340175,
+                "allocatedBytes": 3902337024,
+                "files": 44
               },
               "mongo-config": {
                 "logicalBytes": 0,
@@ -894,38 +894,38 @@
             }
           },
           "total": {
-            "durationMs": 428751,
-            "walInsertedBytes": 8651664,
+            "durationMs": 377243,
+            "walInsertedBytes": 7816912,
             "components": {
               "service": {
                 "status": "captured",
                 "source": "linux-cgroup-v2",
                 "access": "docker-exec",
-                "cpuSeconds": 276.794631,
-                "cgroupLifetimePeakMemoryBytes": 301256704,
-                "mainProcessLifetimePeakRssBytes": 339914752,
-                "blockReadBytes": 19959808,
+                "cpuSeconds": 242.799237,
+                "cgroupLifetimePeakMemoryBytes": 302317568,
+                "mainProcessLifetimePeakRssBytes": 331808768,
+                "blockReadBytes": 14917632,
                 "blockWriteBytes": 0,
-                "networkRxBytes": 1845774046,
-                "networkTxBytes": 10062209050
+                "networkRxBytes": 1844918919,
+                "networkTxBytes": 10059533953
               },
               "mongo": {
                 "status": "captured",
                 "source": "linux-cgroup-v2",
                 "access": "docker-exec",
-                "cpuSeconds": 298.356873,
-                "cgroupLifetimePeakMemoryBytes": 4615454720,
-                "mainProcessLifetimePeakRssBytes": 2428162048,
-                "blockReadBytes": 548864,
+                "cpuSeconds": 249.495548,
+                "cgroupLifetimePeakMemoryBytes": 6227550208,
+                "mainProcessLifetimePeakRssBytes": 2444603392,
+                "blockReadBytes": 57344,
                 "blockWriteBytes": 0,
-                "networkRxBytes": 9998510473,
-                "networkTxBytes": 473189368
+                "networkRxBytes": 9996175675,
+                "networkTxBytes": 472819735
               }
             },
             "storageGrowth": {
               "mongo-db": {
-                "logicalBytes": 3759483081,
-                "allocatedBytes": 3797614592,
+                "logicalBytes": 3759392713,
+                "allocatedBytes": 3797651456,
                 "files": 43
               },
               "mongo-config": {
@@ -950,36 +950,36 @@
         }
       },
       "rust": {
-        "protocolReadinessMs": 33663.031,
+        "protocolReadinessMs": 32179.707,
         "completeMaterialization": {
           "completionBoundary": "rust-persisted-initial-snapshot-lsn",
-          "processingMs": 33517.161,
-          "targetLsn": "1/31FB4000"
+          "processingMs": 31276.163,
+          "targetLsn": "1/31E86000"
         },
         "sourceSlotPosition": {
           "method": "replication-slot-confirmed-flush-lsn",
-          "processingMs": 1101.399,
-          "targetLsn": "1/31FB4000",
-          "confirmed_flush_lsn": "1/31FD62C0"
+          "processingMs": 566.658,
+          "targetLsn": "1/31E86000",
+          "confirmed_flush_lsn": "1/31EA9FC8"
         },
         "resourceEvidenceStatus": "captured",
         "resources": {
           "status": "captured",
           "initial": {
-            "durationMs": 33790,
-            "walInsertedBytes": 1189504,
+            "durationMs": 32274,
+            "walInsertedBytes": 2813280,
             "components": {
               "service": {
                 "status": "captured",
                 "source": "linux-cgroup-v2",
                 "access": "docker-exec",
-                "cpuSeconds": 24.739234,
-                "cgroupLifetimePeakMemoryBytes": 116830208,
-                "mainProcessLifetimePeakRssBytes": 82788352,
-                "blockReadBytes": 19582976,
+                "cpuSeconds": 23.498467,
+                "cgroupLifetimePeakMemoryBytes": 94789632,
+                "mainProcessLifetimePeakRssBytes": 80662528,
+                "blockReadBytes": 471040,
                 "blockWriteBytes": 0,
-                "networkRxBytes": 1367518849,
-                "networkTxBytes": 2599436
+                "networkRxBytes": 1367507973,
+                "networkTxBytes": 2757223
               }
             },
             "storageGrowth": {
@@ -991,20 +991,20 @@
             }
           },
           "total": {
-            "durationMs": 47099,
-            "walInsertedBytes": 2938152,
+            "durationMs": 45430,
+            "walInsertedBytes": 4561960,
             "components": {
               "service": {
                 "status": "captured",
                 "source": "linux-cgroup-v2",
                 "access": "docker-exec",
-                "cpuSeconds": 25.641237,
-                "cgroupLifetimePeakMemoryBytes": 283455488,
-                "mainProcessLifetimePeakRssBytes": 252051456,
-                "blockReadBytes": 19582976,
+                "cpuSeconds": 24.329646,
+                "cgroupLifetimePeakMemoryBytes": 261804032,
+                "mainProcessLifetimePeakRssBytes": 250335232,
+                "blockReadBytes": 471040,
                 "blockWriteBytes": 0,
-                "networkRxBytes": 1368029478,
-                "networkTxBytes": 58884538
+                "networkRxBytes": 1367990740,
+                "networkTxBytes": 59042409
               }
             },
             "storageGrowth": {

@@ -57,9 +57,9 @@ MDBX fits the shape of that stream. It is a memory-mapped B-tree with single-wri
 
 The initial scan also writes less than the steady-state path. Snapshot rows produce current-state documents, routing-index entries, and, for lookup tables, parameter-lookup entries; per-operation tail history starts at the replication handoff. Checkpoint counts and checksums are maintained as incremental accumulators inside the same transactions, so serving a checkpoint never rescans bucket contents.
 
-Rust is there for the per-row loop and the memory profile. Decoding, rule evaluation, JSON normalization, and checksum accumulation run once per source row, more than five million times at the largest canary rung, without a garbage-collected runtime in the loop and with allocation under the implementation's control. Bounded streaming batches keep peak memory between 76 and 111 MiB across the rungs, and the service starts as one native process, which keeps its share of the measured startup-to-readiness window small.
+Rust is there for the per-row loop and the memory profile. Decoding, rule evaluation, JSON normalization, and checksum accumulation run once per source row, more than five million times at the largest canary rung, without a garbage-collected runtime in the loop and with allocation under the implementation's control. Bounded streaming batches keep peak memory between 77 and 90 MiB across the rungs, and the service starts as one native process, which keeps its share of the measured startup-to-readiness window small.
 
-These choices have visible costs. MDBX pages are uncompressed, and at the 5m rung the environment grew 7.73 GiB of allocated storage against 3.52 GiB for the official target's MongoDB volume, about 2.2x: the design trades disk for time. The single-writer model serializes ingestion. An embedded store binds storage to one node and one process, with no replica sets, no independent scaling of storage and service, and none of MongoDB's operational tooling.
+These choices have visible costs. MDBX pages are uncompressed, and at the 5m rung the environment grew 7.73 GiB of allocated storage against 3.63 GiB for the official target's MongoDB volume, about 2.1x: the design trades disk for time. The single-writer model serializes ingestion. An embedded store binds storage to one node and one process, with no replica sets, no independent scaling of storage and service, and none of MongoDB's operational tooling.
 
 ## Current scale canary
 
@@ -69,14 +69,14 @@ The headline boundary is the first `/sync/stream` response that proves the expec
 
 | Source task rows | Official protocol readiness | Rust/MDBX protocol readiness | Official / Rust |
 | ---: | ---: | ---: | ---: |
-| 250,202 | 19.26 s | 2.08 s | 9.26x |
-| 1,000,402 | 81.06 s | 7.22 s | 11.22x |
-| 2,000,802 | 163.50 s | 13.47 s | 12.14x |
-| 5,001,002 | 407.99 s | 33.66 s | 12.12x |
+| 250,202 | 20.46 s | 1.74 s | 11.74x |
+| 1,000,402 | 63.56 s | 5.87 s | 10.83x |
+| 2,000,802 | 146.06 s | 12.24 s | 11.93x |
+| 5,001,002 | 356.87 s | 32.18 s | 11.09x |
 
-Official protocol-readiness elapsed time was 9.26x to 12.14x the Rust/MDBX elapsed time across the four rungs. These are four single-run scale-canary ratios, not estimates of a latency distribution. The run order was official then Rust at every rung, and OS and PostgreSQL caches were not flushed.
+Official protocol-readiness elapsed time was 10.83x to 11.93x the Rust/MDBX elapsed time across the four rungs. These are four single-run scale-canary ratios, not estimates of a latency distribution. The run order was official then Rust at every rung, and OS and PostgreSQL caches were not flushed.
 
-The target-specific complete-materialization observers recorded 18.77/1.99 s, 80.72/6.52 s, 163.09/12.61 s, and 407.53/33.52 s for official/Rust. They are implementation-specific diagnostic boundaries, not a shared protocol metric, so no cross-target ratio is claimed from them.
+The target-specific complete-materialization observers recorded 19.71/1.77 s, 62.82/5.76 s, 145.12/11.99 s, and 356.05/31.28 s for official/Rust. They are implementation-specific diagnostic boundaries, not a shared protocol metric, so no cross-target ratio is claimed from them.
 
 Both targets passed exact selected-bucket initial-state and incremental-churn checks at every rung, including authorization isolation, checkpoint count/checksum recurrence, and client-visible PUT/REMOVE semantics. The verifier checked 200, 100, 100, and 50 routed buckets; the corresponding initial proofs covered 100,082, 100,042, 100,042, and 100,022 PUT operations per target.
 
@@ -84,10 +84,10 @@ Initial-window resource evidence was captured from Linux cgroup v2 and container
 
 | Rows | Official CPU, service + MongoDB | Rust CPU | Official peak memory, service / MongoDB | Rust peak memory | Official / Rust allocated storage growth | Official / Rust inserted WAL |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 250,202 | 22.82 CPU-s | 1.39 CPU-s | 252 / 1,508 MiB | 76 MiB | 0.17 / 0.39 GiB | 0.53 / 0.0004 MiB |
-| 1,000,402 | 103.46 CPU-s | 4.71 CPU-s | 263 / 2,726 MiB | 85 MiB | 0.71 / 1.56 GiB | 2.28 / 0.026 MiB |
-| 2,000,802 | 209.72 CPU-s | 8.86 CPU-s | 263 / 3,501 MiB | 98 MiB | 1.51 / 3.11 GiB | 3.01 / 0.026 MiB |
-| 5,001,002 | 571.69 CPU-s | 24.74 CPU-s | 275 / 4,362 MiB | 111 MiB | 3.52 / 7.73 GiB | 6.68 / 1.13 MiB |
+| 250,202 | 24.36 CPU-s | 1.27 CPU-s | 242 / 1,570 MiB | 80 MiB | 0.17 / 0.39 GiB | 0.53 / 0.27 MiB |
+| 1,000,402 | 76.62 CPU-s | 4.15 CPU-s | 257 / 2,693 MiB | 77 MiB | 0.69 / 1.56 GiB | 2.27 / 0.03 MiB |
+| 2,000,802 | 187.29 CPU-s | 8.71 CPU-s | 258 / 3,665 MiB | 82 MiB | 1.42 / 3.11 GiB | 3.41 / 0.33 MiB |
+| 5,001,002 | 490.15 CPU-s | 23.50 CPU-s | 274 / 5,922 MiB | 90 MiB | 3.63 / 7.73 GiB | 5.88 / 2.68 MiB |
 
 Memory values are cgroup lifetime peaks, so MongoDB includes provisioning before the measured window. Inserted WAL is the cluster-wide WAL-position delta during the window. Network counters are reported per component rather than summed because service-to-MongoDB traffic appears in both namespaces. The checked-in [canary artifact](docs/artifacts/symmetric-canary/README.md) contains the exact timings, boundaries, CPU, peak memory, block I/O, per-component network traffic, storage growth, WAL, tested commit, image identities, and gate counts.
 
@@ -95,19 +95,19 @@ Memory values are cgroup lifetime peaks, so MongoDB includes provisioning before
 
 The resource evidence constrains how the ratios can be explained. The following observations are arithmetic on the recorded values.
 
-Both targets scale close to linearly. Official protocol readiness stays between 77.0 and 81.7 s per million source task rows across the rungs, while Rust falls from 8.3 to a stable 6.7 s per million as its fixed startup share amortizes; together those trends produce the rise from 9.26x toward 12.1x. The measured difference is a per-row cost factor, not a difference in asymptotic behavior.
+Both targets scale close to linearly. Official protocol readiness stays between 63.5 and 81.8 s per million source task rows across the rungs, Rust between 5.9 and 7.0 s per million, and the ratio between 10.8x and 11.9x over a twentyfold row-count range. The measured difference is a per-row cost factor, not a difference in asymptotic behavior.
 
-The CPU gap is larger than the elapsed-time gap. At the 5m rung the official target consumed 571.69 CPU-s across service and MongoDB against 24.74 CPU-s for Rust, a factor of 23.1, or roughly 114 µs against 5 µs of CPU per source task row; the 250k, 1m, and 2m rungs show 16.4x, 22.0x, and 23.7x. The allocation was not the binding constraint on average: over the 5m initial window the official service averaged 0.67 of its 1.5 CPUs, MongoDB 0.73 of its 2.5, and the Rust service 0.73 of its 4. Window averages do not rule out short bursts at the limits.
+The CPU gap is larger than the elapsed-time gap. At the 5m rung the official target consumed 490.15 CPU-s across service and MongoDB against 23.50 CPU-s for Rust, a factor of 20.9, or roughly 98 µs against 5 µs of CPU per source task row; the 250k, 1m, and 2m rungs show 19.2x, 18.5x, and 21.5x. The allocation was not the binding constraint on average: over the 5m initial window the official service averaged 0.68 of its 1.5 CPUs, MongoDB 0.70 of its 2.5, and the Rust service 0.73 of its 4. Window averages do not rule out short bursts at the limits.
 
-Moving derived state dominates the official target's traffic. Within the 5m initial window MongoDB's receive counter recorded 9.31 GiB, matching the service's transmit; the Rust service, whose inbound traffic is essentially the PostgreSQL scan, received 1.27 GiB and transmitted 2.5 MiB. Its derived writes go to the in-process MDBX map and never cross a socket. Peak memory shows the same shape: 111 MiB for Rust against 275 MiB for the official service plus 4,362 MiB for MongoDB.
+Moving derived state dominates the official target's traffic. Within the 5m initial window MongoDB's receive counter recorded 9.31 GiB, matching the service's transmit; the Rust service, whose inbound traffic is essentially the PostgreSQL scan, received 1.27 GiB and transmitted 2.6 MiB. Its derived writes go to the in-process MDBX map and never cross a socket. Peak memory shows the same shape: 90 MiB for Rust against 274 MiB for the official service plus 5,922 MiB for MongoDB.
 
-The evidence is not one-sided. Rust's allocated storage grew 7.73 GiB at the 5m rung against the official target's 3.52 GiB; uncompressed on-disk state is part of the price of the write path described above.
+The evidence is not one-sided. Rust's allocated storage grew 7.73 GiB at the 5m rung against the official target's 3.63 GiB; uncompressed on-disk state is part of the price of the write path described above.
 
 The following are hypotheses consistent with those signals, not measurements of the official implementation: per-operation serialization and client/server round trips between the service and its storage engine; persistence of per-operation history with checkpoint checksums computed from stored operations, where this implementation writes current state once and maintains incremental accumulators; and per-row overhead of a garbage-collected runtime in the materialization loop. The canary cannot rank these, and as stated in Motivation, a comparison that changes the language, runtime, storage engine, and data layout at once cannot isolate any one of them as the cause.
 
-The canary took 18 minutes 44 seconds and retained about 13 GiB locally. It ran in Docker Desktop's Linux VM rather than on controlled native Linux hardware. Official, MongoDB, and PostgreSQL images were digest-pinned; the locally built Rust image was executed and recorded by immutable image ID. A repeated, counterbalanced native-Linux matrix remains the appropriate next step for distributional performance claims.
+The canary took 16 minutes 52 seconds and retained about 13 GiB locally. It ran in Docker Desktop's Linux VM rather than on controlled native Linux hardware. Official, MongoDB, and PostgreSQL images were digest-pinned; the locally built Rust image was executed and recorded by immutable image ID. A repeated, counterbalanced native-Linux matrix remains the appropriate next step for distributional performance claims.
 
-Local release checks passed 245 Rust tests, six live PostgreSQL replication tests, and 69 Node harness/export/ladder tests, along with formatting, warnings-denied Clippy, dependency audits, and the frontend build.
+Local release checks passed 255 Rust tests, four live PostgreSQL replication tests, and 69 Node harness/export/ladder tests, along with formatting, warnings-denied Clippy, dependency audits, and the frontend build.
 
 The other compact artifacts under `docs/artifacts/` are older exploratory runs from asymmetric topologies and earlier implementation revisions. The [benchmark methodology](docs/benchmark.md) defines the claim boundary for each result.
 
