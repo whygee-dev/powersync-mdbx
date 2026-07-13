@@ -75,14 +75,29 @@ pub struct CanonicalBucketGroup {
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CanonicalBinding {
-    AuthParameter { name: String },
-    SubscriptionParameter { name: String },
+    AuthParameter {
+        name: String,
+    },
+    SubscriptionParameter {
+        name: String,
+    },
     RequestUserId,
-    RequestJwt { claim: String },
-    RequestParameter { name: String },
-    RequestParameterArray { name: String },
-    ParameterQueryColumn { name: String, query: String },
-    BucketParameter { name: String },
+    RequestJwt {
+        claim: String,
+    },
+    RequestParameter {
+        name: String,
+    },
+    RequestParameterArray {
+        name: String,
+    },
+    ParameterQueryColumn {
+        name: String,
+        lookup: Box<ParameterLookupPlan>,
+    },
+    BucketParameter {
+        name: String,
+    },
 }
 
 /// A structured filter predicate. Replaces the raw-SQL-substring `row_filter` /
@@ -176,11 +191,70 @@ pub struct CanonicalProjectedColumn {
     pub alias: String,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ParameterLookupSelectedColumn {
+    pub alias: String,
+    pub column: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ParameterLookupPlan {
+    pub raw_query: String,
+    pub source_table: String,
+    pub selected: Vec<ParameterLookupSelectedColumn>,
+    pub key_bindings: Vec<(String, CanonicalBinding)>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub row_predicate: Option<Predicate>,
+    pub lookup_id: String,
+}
+
+impl ParameterLookupPlan {
+    /// Every source-table column the lookup reads: key-binding columns,
+    /// selected columns, and columns referenced by the row predicate. The
+    /// ingest row document and the snapshot type guard must both cover this
+    /// exact set, or a predicate could evaluate against a column the store
+    /// never captured.
+    pub fn referenced_columns(&self) -> std::collections::BTreeSet<String> {
+        let mut columns = std::collections::BTreeSet::new();
+        columns.extend(self.key_bindings.iter().map(|(column, _)| column.clone()));
+        columns.extend(self.selected.iter().map(|column| column.column.clone()));
+        if let Some(predicate) = &self.row_predicate {
+            collect_predicate_columns(predicate, &mut columns);
+        }
+        columns
+    }
+}
+
+fn collect_predicate_columns(
+    predicate: &Predicate,
+    columns: &mut std::collections::BTreeSet<String>,
+) {
+    match predicate {
+        Predicate::And { terms } | Predicate::Or { terms } => {
+            for term in terms {
+                collect_predicate_columns(term, columns);
+            }
+        }
+        Predicate::IsNull { operand, .. } => collect_operand_column(operand, columns),
+        Predicate::Eq { left, right } | Predicate::In { left, right } => {
+            collect_operand_column(left, columns);
+            collect_operand_column(right, columns);
+        }
+    }
+}
+
+fn collect_operand_column(operand: &Operand, columns: &mut std::collections::BTreeSet<String>) {
+    if let Operand::Column { name } = operand {
+        columns.insert(name.clone());
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct RustExecutionPlan {
     pub(super) canonical: CanonicalSemanticPlan,
     pub(super) streams_by_name: HashMap<String, CanonicalStream>,
     pub(super) tables_by_source: HashMap<String, CompiledTablePlan>,
+    pub(super) lookup_tables_by_source: BTreeMap<String, CompiledLookupTablePlan>,
     pub(super) route_index_columns_by_object: HashMap<String, Vec<Vec<String>>>,
     pub(super) stream_bucket_groups_by_name: HashMap<String, Vec<StreamBucketGroup>>,
     pub(super) accumulator_queries_by_object: HashMap<String, Vec<AccumulatorQueryTemplate>>,
@@ -197,6 +271,12 @@ pub struct CompiledTablePlan {
     pub(super) object_type: String,
     pub(super) route_columns: Vec<String>,
     pub(super) object_id_expression: Option<CanonicalComputedExpression>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct CompiledLookupTablePlan {
+    pub source_table: String,
+    pub lookups: Vec<ParameterLookupPlan>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

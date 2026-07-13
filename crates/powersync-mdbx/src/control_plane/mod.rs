@@ -9,18 +9,13 @@ use std::{
 
 use axum::http::{HeaderMap, StatusCode};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use futures_util::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use tokio::sync::Semaphore;
-use tokio::time::{timeout, Duration};
-use tokio_postgres::{types::ToSql, NoTls};
 
 use crate::{
     auth::{ApiAuthConfig, AuthFailure, TokenPayload, UserAuthConfig},
     config::load_config_from_env,
-    postgres_tls::{ParsedPostgresConnection, PostgresTlsPolicy},
     replication::{ingest::ReplicationMdbxStore, redact_postgres_uri},
     sync_rules::{
         canonical_storage_contract_id, compile_sync_rules_source, default_bucket_requests,
@@ -34,7 +29,6 @@ mod parameters;
 
 pub use debug::{debug_sync_rules, SyncRulesDebugInfo};
 pub use parameters::ResolvedParameterContext;
-use parameters::{prepare_parameter_query_sql, row_value_to_string};
 
 // Service-owned data lives under the working directory by default: a
 // world-writable /tmp default would let any local user pre-create or replace
@@ -82,10 +76,6 @@ pub struct ServiceContext {
     allow_anonymous_sync: bool,
     source_connections: Vec<SourceConnection>,
     query_capability_enabled: bool,
-    parameter_query_limit: Arc<Semaphore>,
-    parameter_query_acquire_timeout: Duration,
-    parameter_query_statement_timeout: Duration,
-    parameter_query_max_rows: usize,
     sync_rules_state: Arc<SyncRulesState>,
 }
 
@@ -115,22 +105,10 @@ impl ServiceContext {
                 );
             }
         }
-        let parameter_query_max_concurrency =
-            env_usize("POWERSYNC_RUST_PARAMETER_QUERY_MAX_CONCURRENCY", 16)?;
         let source_connections = parse_source_connections_from_env_with_config(
             config.as_ref().map(|loaded| loaded.config()),
         );
         let query_capability_enabled = env_flag("POWERSYNC_RUST_ENABLE_QUERY_CAPABILITY");
-        if query_capability_enabled {
-            for connection in &source_connections {
-                ParsedPostgresConnection::parse(&connection.uri).map_err(|error| {
-                    format!(
-                        "invalid TLS policy for source connection {}: {error}",
-                        connection.id
-                    )
-                })?;
-            }
-        }
         Ok(Self {
             api_auth: ApiAuthConfig::from_env_with_config(
                 config.as_ref().map(|loaded| loaded.config()),
@@ -139,16 +117,6 @@ impl ServiceContext {
             allow_anonymous_sync,
             source_connections,
             query_capability_enabled,
-            parameter_query_limit: Arc::new(Semaphore::new(parameter_query_max_concurrency)),
-            parameter_query_acquire_timeout: Duration::from_millis(env_u64(
-                "POWERSYNC_RUST_PARAMETER_QUERY_ACQUIRE_TIMEOUT_MS",
-                2_000,
-            )?),
-            parameter_query_statement_timeout: Duration::from_millis(env_u64(
-                "POWERSYNC_RUST_PARAMETER_QUERY_STATEMENT_TIMEOUT_MS",
-                5_000,
-            )?),
-            parameter_query_max_rows: env_usize("POWERSYNC_RUST_PARAMETER_QUERY_MAX_ROWS", 10_000)?,
             sync_rules_state,
         })
     }
@@ -185,10 +153,6 @@ impl ServiceContext {
             allow_anonymous_sync: false,
             source_connections,
             query_capability_enabled,
-            parameter_query_limit: Arc::new(Semaphore::new(16)),
-            parameter_query_acquire_timeout: Duration::from_secs(2),
-            parameter_query_statement_timeout: Duration::from_secs(5),
-            parameter_query_max_rows: 10_000,
             sync_rules_state,
         })
     }
@@ -249,110 +213,6 @@ impl ServiceContext {
 
     pub fn table_plan(&self, source_table: &str) -> Option<CompiledTablePlan> {
         self.active_plan().table_plan(source_table).cloned()
-    }
-
-    pub async fn parameter_query_rows(
-        &self,
-        query: &str,
-        columns: &[String],
-        token: Option<&TokenPayload>,
-        request_parameters: &serde_json::Map<String, Value>,
-        subscription_parameters: &BTreeMap<String, String>,
-    ) -> Result<Vec<BTreeMap<String, String>>, String> {
-        let _permit = timeout(
-            self.parameter_query_acquire_timeout,
-            self.parameter_query_limit.acquire(),
-        )
-        .await
-        .map_err(|_| "parameter query concurrency limit acquisition timed out".to_owned())?
-        .map_err(|_| "parameter query concurrency limiter is closed".to_owned())?;
-        let connection = self
-            .source_connections
-            .first()
-            .ok_or_else(|| "parameter query requires a configured source connection".to_owned())?;
-        let context = ResolvedParameterContext::from_request(token, request_parameters);
-        let (sql, values) = prepare_parameter_query_sql(query, &context, subscription_parameters)?;
-        let params = values
-            .iter()
-            .map(|value| value as &(dyn ToSql + Sync))
-            .collect::<Vec<_>>();
-        let parsed = ParsedPostgresConnection::parse(&connection.uri)?;
-        let connect_timeout = self.parameter_query_acquire_timeout;
-        let (client, mut connection_handle) = match &parsed.tls {
-            PostgresTlsPolicy::Disabled => {
-                let (client, task) = timeout(connect_timeout, parsed.config.connect(NoTls))
-                    .await
-                    .map_err(|_| "parameter query source connection timed out".to_owned())?
-                    .map_err(|error| {
-                        format!("failed to connect source for parameter query: {error}")
-                    })?;
-                (client, tokio::spawn(task))
-            }
-            PostgresTlsPolicy::VerifyFull { .. } => {
-                let connector = parsed.rustls_connector()?;
-                let (client, task) = timeout(connect_timeout, parsed.config.connect(connector))
-                    .await
-                    .map_err(|_| "parameter query source connection timed out".to_owned())?
-                    .map_err(|error| {
-                        format!("failed to connect source for parameter query: {error}")
-                    })?;
-                (client, tokio::spawn(task))
-            }
-        };
-        let statement_timeout = self.parameter_query_statement_timeout;
-        let max_rows = self.parameter_query_max_rows;
-        let result = timeout(statement_timeout + Duration::from_secs(1), async {
-            let timeout_ms = statement_timeout.as_millis().to_string();
-            client
-                .execute(
-                    "SELECT set_config('statement_timeout', $1, false)",
-                    &[&timeout_ms],
-                )
-                .await
-                .map_err(|error| format!("failed to set parameter query timeout: {error}"))?;
-            let stream = client
-                .query_raw(&sql, params)
-                .await
-                .map_err(|error| format!("failed to execute parameter query: {error}"))?;
-            futures_util::pin_mut!(stream);
-            let mut resolved = Vec::new();
-            while let Some(row) = stream
-                .try_next()
-                .await
-                .map_err(|error| format!("failed to read parameter query result: {error}"))?
-            {
-                if resolved.len() == max_rows {
-                    return Err(format!(
-                        "parameter query result exceeds the configured {max_rows}-row limit"
-                    ));
-                }
-                resolved.push(
-                    columns
-                        .iter()
-                        .map(|column| {
-                            row_value_to_string(&row, column)
-                                .map(|value| (column.clone(), value))
-                                .map_err(|error| {
-                                    format!(
-                                        "parameter query did not return scalar column {column}: {error}"
-                                    )
-                                })
-                        })
-                        .collect::<Result<BTreeMap<_, _>, _>>()?,
-                );
-            }
-            Ok(resolved)
-        })
-        .await
-        .map_err(|_| "parameter query exceeded its execution deadline".to_owned())?;
-        drop(client);
-        if timeout(Duration::from_secs(1), &mut connection_handle)
-            .await
-            .is_err()
-        {
-            connection_handle.abort();
-        }
-        result
     }
 
     pub fn storage_contract_id(&self) -> String {
@@ -1334,10 +1194,10 @@ pub(super) fn binding_sql(binding: &CanonicalBinding) -> String {
         CanonicalBinding::RequestParameterArray { name } => {
             format!("json_each(request.parameters() ->> '{name}')")
         }
-        CanonicalBinding::ParameterQueryColumn { name, query } => {
+        CanonicalBinding::ParameterQueryColumn { name, lookup } => {
             format!(
                 "parameter_query_column('{}','{}')",
-                URL_SAFE_NO_PAD.encode(query),
+                URL_SAFE_NO_PAD.encode(&lookup.raw_query),
                 name.replace('\'', "''")
             )
         }
@@ -1472,24 +1332,6 @@ fn env_flag(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn env_u64(name: &'static str, default: u64) -> Result<u64, String> {
-    match env::var(name) {
-        Ok(raw) => raw
-            .trim()
-            .parse::<u64>()
-            .ok()
-            .filter(|value| *value > 0)
-            .ok_or_else(|| format!("{name} must be a positive integer, got {raw}")),
-        Err(_) => Ok(default),
-    }
-}
-
-fn env_usize(name: &'static str, default: usize) -> Result<usize, String> {
-    env_u64(name, default as u64).and_then(|value| {
-        usize::try_from(value).map_err(|_| format!("{name} is too large for this platform"))
-    })
-}
-
 pub fn extract_string_map(
     map: &Option<serde_json::Map<String, Value>>,
 ) -> BTreeMap<String, String> {
@@ -1587,51 +1429,6 @@ mod tests {
                 &subscription_parameters,
             ),
             Some("org-sub".to_owned())
-        );
-    }
-
-    #[test]
-    fn parameter_query_sql_rewrite_handles_fixture_bindings_and_json_each() {
-        let token = TokenPayload::new_for_tests(json!({"admin": true}), Some("user-1".to_owned()));
-        let request_parameters = serde_json::Map::from_iter([
-            (
-                "schema_version".to_owned(),
-                Value::String("desktop".to_owned()),
-            ),
-            ("teamId".to_owned(), Value::String("team-1".to_owned())),
-            (
-                "workspaceIds".to_owned(),
-                Value::String(r#"["ws-1"]"#.to_owned()),
-            ),
-            (
-                "projectIds".to_owned(),
-                Value::String(r#"["program-1"]"#.to_owned()),
-            ),
-        ]);
-        let context = ResolvedParameterContext::from_request(Some(&token), &request_parameters);
-        let (sql, values) = prepare_parameter_query_sql(
-            r#"SELECT "Membership"."workspaceId" AS "workspaceId", project_each.value AS "projectId" FROM "Membership", json_each(connection.parameters() ->> 'workspaceIds'), json_each(connection.parameters() ->> 'projectIds') AS project_each WHERE connection.parameters() ->> 'teamId' IS NOT NULL AND connection.parameters() ->> 'schema_version' = 'desktop' AND "Membership"."teamId" = connection.parameters() ->> 'teamId' AND "Membership"."workspaceId" = json_each.value AND "Membership"."userId" = auth.user_id()"#,
-            &context,
-            &BTreeMap::new(),
-        )
-        .expect("parameter query should rewrite");
-
-        assert!(sql.contains("jsonb_array_elements_text(($1)::jsonb) AS json_each(value)"));
-        assert!(sql.contains("jsonb_array_elements_text(($2)::jsonb) AS project_each(value)"));
-        assert!(sql.contains("$3 IS NOT NULL"));
-        assert!(sql.contains("$4 = 'desktop'"));
-        assert!(sql.contains(r#""Membership"."teamId" = $5"#));
-        assert!(sql.contains(r#""Membership"."userId" = $6"#));
-        assert_eq!(
-            values,
-            vec![
-                r#"["ws-1"]"#,
-                r#"["program-1"]"#,
-                "team-1",
-                "desktop",
-                "team-1",
-                "user-1"
-            ]
         );
     }
 

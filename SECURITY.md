@@ -18,6 +18,6 @@ When JWT verification keys are configured, startup also requires non-empty accep
 
 Remote JWKS are loaded once at startup. Their URLs must use HTTPS; HTTP is accepted only for `localhost` or a loopback IP address in explicit development configurations. Redirects from HTTPS remain HTTPS. A loopback HTTP URL may redirect to HTTPS or another loopback HTTP URL.
 
-Request bodies, bucket counts, stream lifetimes, concurrent sync reads, parameter-query concurrency/time/rows, retained tail history, and per-read entry/data bytes are bounded. Parameter queries still establish one bounded source connection per evaluation rather than using a pool.
+Request bodies, bucket counts, stream lifetimes, concurrent sync reads, retained tail history, and per-read entry/data bytes are bounded. Table-backed parameter lookups are materialized into MDBX during replication and resolved with in-process reads at request time, bounded by the same per-request bucket-count cap (`POWERSYNC_RUST_MAX_BUCKETS_PER_REQUEST`, default 10,000), which errors rather than truncates past the limit; no PostgreSQL connection is opened on the `/sync/stream` path.
 
 Online layout-changing rule activation is deliberately rejected. Removing all persisted state outside the managed bootstrap path also removes cursor-epoch history; operators must treat that as a client cursor reset. These documented limitations do not need private reporting unless a report adds a materially different exploit or impact.

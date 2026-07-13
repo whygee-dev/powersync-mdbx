@@ -119,7 +119,40 @@
           "binding": {
             "type": "parameter_query_column",
             "name": "workspaceId",
-            "query": "SELECT \"workspaceId\" AS \"workspaceId\" FROM \"Membership\" WHERE connection.parameters() ->> 'schema_version' = 'web' AND \"userId\" = auth.user_id() AND \"workspaceId\" IS NOT NULL AND \"teamId\" = connection.parameters() ->> 'selectedTeamId'"
+            "lookup": {
+              "raw_query": "SELECT \"workspaceId\" AS \"workspaceId\" FROM \"Membership\" WHERE connection.parameters() ->> 'schema_version' = 'web' AND \"userId\" = auth.user_id() AND \"workspaceId\" IS NOT NULL AND \"teamId\" = connection.parameters() ->> 'selectedTeamId'",
+              "source_table": "Membership",
+              "selected": [
+                {
+                  "alias": "workspaceId",
+                  "column": "workspaceId"
+                }
+              ],
+              "key_bindings": [
+                [
+                  "teamId",
+                  {
+                    "type": "request_parameter",
+                    "name": "selectedTeamId"
+                  }
+                ],
+                [
+                  "userId",
+                  {
+                    "type": "request_user_id"
+                  }
+                ]
+              ],
+              "row_predicate": {
+                "type": "is_null",
+                "operand": {
+                  "type": "column",
+                  "name": "workspaceId"
+                },
+                "negated": true
+              },
+              "lookup_id": "f7a413f624264ac4"
+            }
           }
         },
         {
@@ -170,7 +203,40 @@
               "binding": {
                 "type": "parameter_query_column",
                 "name": "workspaceId",
-                "query": "SELECT \"workspaceId\" AS \"workspaceId\" FROM \"Membership\" WHERE connection.parameters() ->> 'schema_version' = 'web' AND \"userId\" = auth.user_id() AND \"workspaceId\" IS NOT NULL AND \"teamId\" = connection.parameters() ->> 'selectedTeamId'"
+                "lookup": {
+                  "raw_query": "SELECT \"workspaceId\" AS \"workspaceId\" FROM \"Membership\" WHERE connection.parameters() ->> 'schema_version' = 'web' AND \"userId\" = auth.user_id() AND \"workspaceId\" IS NOT NULL AND \"teamId\" = connection.parameters() ->> 'selectedTeamId'",
+                  "source_table": "Membership",
+                  "selected": [
+                    {
+                      "alias": "workspaceId",
+                      "column": "workspaceId"
+                    }
+                  ],
+                  "key_bindings": [
+                    [
+                      "teamId",
+                      {
+                        "type": "request_parameter",
+                        "name": "selectedTeamId"
+                      }
+                    ],
+                    [
+                      "userId",
+                      {
+                        "type": "request_user_id"
+                      }
+                    ]
+                  ],
+                  "row_predicate": {
+                    "type": "is_null",
+                    "operand": {
+                      "type": "column",
+                      "name": "workspaceId"
+                    },
+                    "negated": true
+                  },
+                  "lookup_id": "f7a413f624264ac4"
+                }
               }
             }
           ],
@@ -380,7 +446,25 @@
           "binding": {
             "type": "parameter_query_column",
             "name": "workspaceId",
-            "query": "SELECT \"workspaceId\" AS \"workspaceId\" FROM \"Membership\" WHERE \"userId\" = auth.user_id()"
+            "lookup": {
+              "raw_query": "SELECT \"workspaceId\" AS \"workspaceId\" FROM \"Membership\" WHERE \"userId\" = auth.user_id()",
+              "source_table": "Membership",
+              "selected": [
+                {
+                  "alias": "workspaceId",
+                  "column": "workspaceId"
+                }
+              ],
+              "key_bindings": [
+                [
+                  "userId",
+                  {
+                    "type": "request_user_id"
+                  }
+                ]
+              ],
+              "lookup_id": "091e8f29d7e8a29e"
+            }
           }
         }
       ],
@@ -432,7 +516,25 @@
               "binding": {
                 "type": "parameter_query_column",
                 "name": "workspaceId",
-                "query": "SELECT \"workspaceId\" AS \"workspaceId\" FROM \"Membership\" WHERE \"userId\" = auth.user_id()"
+                "lookup": {
+                  "raw_query": "SELECT \"workspaceId\" AS \"workspaceId\" FROM \"Membership\" WHERE \"userId\" = auth.user_id()",
+                  "source_table": "Membership",
+                  "selected": [
+                    {
+                      "alias": "workspaceId",
+                      "column": "workspaceId"
+                    }
+                  ],
+                  "key_bindings": [
+                    [
+                      "userId",
+                      {
+                        "type": "request_user_id"
+                      }
+                    ]
+                  ],
+                  "lookup_id": "091e8f29d7e8a29e"
+                }
               }
             }
           ],
@@ -498,7 +600,25 @@
           "binding": {
             "type": "parameter_query_column",
             "name": "workspaceId",
-            "query": "SELECT \"workspaceId\" AS \"workspaceId\" FROM \"Membership\" WHERE \"userId\" = auth.user_id()"
+            "lookup": {
+              "raw_query": "SELECT \"workspaceId\" AS \"workspaceId\" FROM \"Membership\" WHERE \"userId\" = auth.user_id()",
+              "source_table": "Membership",
+              "selected": [
+                {
+                  "alias": "workspaceId",
+                  "column": "workspaceId"
+                }
+              ],
+              "key_bindings": [
+                [
+                  "userId",
+                  {
+                    "type": "request_user_id"
+                  }
+                ]
+              ],
+              "lookup_id": "091e8f29d7e8a29e"
+            }
           }
         }
       ],
@@ -524,7 +644,25 @@
               "binding": {
                 "type": "parameter_query_column",
                 "name": "workspaceId",
-                "query": "SELECT \"workspaceId\" AS \"workspaceId\" FROM \"Membership\" WHERE \"userId\" = auth.user_id()"
+                "lookup": {
+                  "raw_query": "SELECT \"workspaceId\" AS \"workspaceId\" FROM \"Membership\" WHERE \"userId\" = auth.user_id()",
+                  "source_table": "Membership",
+                  "selected": [
+                    {
+                      "alias": "workspaceId",
+                      "column": "workspaceId"
+                    }
+                  ],
+                  "key_bindings": [
+                    [
+                      "userId",
+                      {
+                        "type": "request_user_id"
+                      }
+                    ]
+                  ],
+                  "lookup_id": "091e8f29d7e8a29e"
+                }
               }
             }
           ],

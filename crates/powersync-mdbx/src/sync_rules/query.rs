@@ -570,7 +570,19 @@ fn parse_parameter_query_column_binding(binding: &str) -> Option<CanonicalBindin
     let encoded_query = parse_string_literal(args[0])?;
     let query = String::from_utf8(URL_SAFE_NO_PAD.decode(encoded_query).ok()?).ok()?;
     let name = normalize_identifier(&parse_string_literal(args[1])?);
-    (!name.is_empty()).then_some(CanonicalBinding::ParameterQueryColumn { name, query })
+    if name.is_empty() {
+        return None;
+    }
+    // The b64 payload is only ever produced by `binding_sql_fragment` from a
+    // plan that already passed `parse_parameter_lookup_plan` in lowering, so
+    // this re-parse cannot fail for authored rules; a `None` here would fall
+    // through to `Column` classification, which is why unsupported forms must
+    // be rejected at lowering rather than at this decode.
+    let lookup = super::lowering::parse_parameter_lookup_plan(&query).ok()?;
+    Some(CanonicalBinding::ParameterQueryColumn {
+        name,
+        lookup: Box::new(lookup),
+    })
 }
 
 fn binding_name(binding: &CanonicalBinding) -> String {
@@ -792,7 +804,7 @@ pub(super) fn normalize_identifier(identifier: &str) -> String {
     identifier
         .trim()
         .split('.')
-        .map(|part| part.trim().trim_matches('"'))
+        .map(|part| part.trim().trim_matches('"').replace("\"\"", "\""))
         .collect::<Vec<_>>()
         .join(".")
 }

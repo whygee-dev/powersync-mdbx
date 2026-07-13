@@ -8,6 +8,26 @@ use super::{
 };
 use crate::sync_rules::{JsonColumnTypes, RustExecutionPlan};
 
+#[derive(Debug, Clone)]
+pub(super) struct DerivedParameterLookupOp {
+    pub(super) source_table: String,
+    pub(super) operation: ParameterLookupOperation,
+}
+
+#[derive(Debug, Clone)]
+pub(super) enum ParameterLookupOperation {
+    Put {
+        row: RowData,
+    },
+    Update {
+        old_data: Option<RowData>,
+        new_data: RowData,
+    },
+    Remove {
+        old_data: RowData,
+    },
+}
+
 pub(super) fn derive_sync_tail_ops_with_options(
     batch: &ReplicationCommitBatch,
     plan: &RustExecutionPlan,
@@ -86,7 +106,9 @@ pub(super) fn derive_sync_tail_ops_with_options(
             EventType::Truncate(tables) => {
                 for table_name in tables {
                     if let Some(source_table) = table_name.as_ref().strip_prefix("public.") {
-                        if plan.table_plan(source_table).is_some() {
+                        if plan.table_plan(source_table).is_some()
+                            || plan.lookup_table_plan(source_table).is_some()
+                        {
                             return Err(ReplicationIngestError::UnsupportedPgoutputMessage(
                                 "truncate on a materialized table",
                             ));
@@ -99,6 +121,75 @@ pub(super) fn derive_sync_tail_ops_with_options(
     }
 
     Ok(ops)
+}
+
+pub(super) fn derive_parameter_lookup_ops(
+    batch: &ReplicationCommitBatch,
+    plan: &RustExecutionPlan,
+) -> Result<Vec<DerivedParameterLookupOp>, ReplicationIngestError> {
+    let mut operations = Vec::new();
+    for change in &batch.changes {
+        match &change.event_type {
+            EventType::Insert {
+                schema,
+                table,
+                data,
+                ..
+            } if schema.as_ref() == "public" => {
+                if let Some(lookup_table) = plan.lookup_table_plan(table) {
+                    operations.push(DerivedParameterLookupOp {
+                        source_table: lookup_table.source_table.clone(),
+                        operation: ParameterLookupOperation::Put { row: data.clone() },
+                    });
+                }
+            }
+            EventType::Update {
+                schema,
+                table,
+                old_data,
+                new_data,
+                ..
+            } if schema.as_ref() == "public" => {
+                if let Some(lookup_table) = plan.lookup_table_plan(table) {
+                    operations.push(DerivedParameterLookupOp {
+                        source_table: lookup_table.source_table.clone(),
+                        operation: ParameterLookupOperation::Update {
+                            old_data: old_data.clone(),
+                            new_data: new_data.clone(),
+                        },
+                    });
+                }
+            }
+            EventType::Delete {
+                schema,
+                table,
+                old_data,
+                ..
+            } if schema.as_ref() == "public" => {
+                if let Some(lookup_table) = plan.lookup_table_plan(table) {
+                    operations.push(DerivedParameterLookupOp {
+                        source_table: lookup_table.source_table.clone(),
+                        operation: ParameterLookupOperation::Remove {
+                            old_data: old_data.clone(),
+                        },
+                    });
+                }
+            }
+            EventType::Truncate(tables) => {
+                for table_name in tables {
+                    if let Some(source_table) = table_name.as_ref().strip_prefix("public.") {
+                        if plan.lookup_table_plan(source_table).is_some() {
+                            return Err(ReplicationIngestError::UnsupportedPgoutputMessage(
+                                "truncate on a materialized table",
+                            ));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(operations)
 }
 
 pub(super) fn sync_rule_error_to_ingest_error(

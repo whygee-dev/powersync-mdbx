@@ -1,4 +1,4 @@
-use std::{env, str::FromStr, sync::Arc, time::Instant};
+use std::{collections::BTreeSet, env, str::FromStr, sync::Arc, time::Instant};
 
 use futures_util::{StreamExt, TryStreamExt};
 use pg_walstream::{
@@ -12,7 +12,7 @@ use super::{ingest::ReplicationMdbxStore, postgres::PostgresLsn, PostgresReplica
 use crate::{
     control_plane::ServiceContext,
     replication::runtime::ReplicationBootstrap,
-    sync_rules::{CompiledTablePlan, JsonColumnType, JsonColumnTypes},
+    sync_rules::{CompiledLookupTablePlan, CompiledTablePlan, JsonColumnType, JsonColumnTypes},
 };
 
 #[derive(Debug, Clone, Default)]
@@ -63,11 +63,22 @@ pub async fn run_initial_snapshot_if_enabled(
     let plan = service_context.active_plan();
     let source_identity =
         initial_snapshot_source_identity(&control.client, config, plan.as_ref()).await?;
-    let required_source_tables = plan
-        .source_tables()
-        .into_iter()
-        .map(CompiledTablePlan::source_table)
-        .collect::<Vec<_>>();
+    let mut required_source_tables: Vec<&str> = Vec::new();
+    for table in plan.source_tables() {
+        if !required_source_tables.iter().any(|candidate| {
+            unqualified_table(candidate) == unqualified_table(table.source_table())
+        }) {
+            required_source_tables.push(table.source_table());
+        }
+    }
+    for table in plan.lookup_source_tables() {
+        if !required_source_tables
+            .iter()
+            .any(|candidate| unqualified_table(candidate) == unqualified_table(&table.source_table))
+        {
+            required_source_tables.push(table.source_table.as_str());
+        }
+    }
     bootstrap
         .ensure_publication_covers(&control.client, &required_source_tables)
         .await
@@ -135,44 +146,44 @@ pub async fn run_initial_snapshot_if_enabled(
         .await
         .map_err(|error| format!("import replication slot snapshot: {error}"))?;
 
-    for table_plan in plan.source_tables() {
+    let mut source_tables = plan
+        .source_tables()
+        .into_iter()
+        .map(CompiledTablePlan::source_table)
+        .collect::<Vec<_>>();
+    for lookup_table in plan.lookup_source_tables() {
+        if !source_tables
+            .iter()
+            .any(|table| unqualified_table(table) == unqualified_table(&lookup_table.source_table))
+        {
+            source_tables.push(lookup_table.source_table.as_str());
+        }
+    }
+
+    for source_table in source_tables {
         let mut batch_rows = Vec::with_capacity(batch_size);
-        let (column_types, stream) = load_table_row_stream(&snapshot_txn, table_plan).await?;
+        let (metadata, stream) = load_table_row_stream(&snapshot_txn, source_table).await?;
+        if let Some(lookup_table) = plan.lookup_table_plan(source_table) {
+            validate_lookup_table_columns(source_table, lookup_table, &metadata)?;
+        }
         futures_util::pin_mut!(stream);
-        while let Some(row) = stream.try_next().await.map_err(|error| {
-            format!(
-                "snapshot query stream {}: {error}",
-                table_plan.source_table()
-            )
-        })? {
+        while let Some(row) = stream
+            .try_next()
+            .await
+            .map_err(|error| format!("snapshot query stream {}: {error}", source_table))?
+        {
             batch_rows.push(row);
             rows_scanned += 1;
             if batch_rows.len() >= batch_size {
                 let rows = std::mem::replace(&mut batch_rows, Vec::with_capacity(batch_size));
-                store
-                    .persist_initial_snapshot_rows_with_presorted_columns_and_types(
-                        table_plan.source_table(),
-                        rows,
-                        PostgresLsn(0),
-                        plan.as_ref(),
-                        &column_types,
-                    )
-                    .map_err(|error| format!("persist initial snapshot batch: {error}"))?;
+                persist_snapshot_batch(store, source_table, rows, plan.as_ref(), &metadata)?;
                 batches_persisted += 1;
             }
         }
 
         if !batch_rows.is_empty() {
             let rows = std::mem::take(&mut batch_rows);
-            store
-                .persist_initial_snapshot_rows_with_presorted_columns_and_types(
-                    table_plan.source_table(),
-                    rows,
-                    PostgresLsn(0),
-                    plan.as_ref(),
-                    &column_types,
-                )
-                .map_err(|error| format!("persist initial snapshot batch: {error}"))?;
+            persist_snapshot_batch(store, source_table, rows, plan.as_ref(), &metadata)?;
             batches_persisted += 1;
         }
     }
@@ -407,15 +418,15 @@ fn escape_sql_literal(value: &str) -> String {
 
 async fn load_table_row_stream<C: GenericClient>(
     client: &C,
-    table_plan: &CompiledTablePlan,
+    source_table: &str,
 ) -> Result<
     (
-        JsonColumnTypes,
+        SnapshotTableMetadata,
         impl futures_util::Stream<Item = Result<RowData, String>>,
     ),
     String,
 > {
-    let (schema, table) = split_table_name(table_plan.source_table());
+    let (schema, table) = split_table_name(source_table);
     let mut table_columns = table_columns(client, schema, table).await?;
     table_columns.sort_by(|left, right| left.name.cmp(&right.name));
     let columns = table_columns
@@ -426,6 +437,10 @@ async fn load_table_row_stream<C: GenericClient>(
         .iter()
         .map(|column| (column.name.clone(), column.json_type))
         .collect::<JsonColumnTypes>();
+    let postgres_types = table_columns
+        .iter()
+        .map(|column| (column.name.clone(), column.postgres_type.clone()))
+        .collect();
     let query = format!(
         "SELECT {} FROM {}{}",
         columns
@@ -439,7 +454,7 @@ async fn load_table_row_stream<C: GenericClient>(
     let stream = client
         .query_raw(query.as_str(), std::iter::empty::<&(dyn ToSql + Sync)>())
         .await
-        .map_err(|error| format!("snapshot query {}: {error}", table_plan.source_table()))?;
+        .map_err(|error| format!("snapshot query {source_table}: {error}"))?;
     let column_names = columns
         .iter()
         .map(|column| Arc::<str>::from(column.as_str()))
@@ -448,7 +463,13 @@ async fn load_table_row_stream<C: GenericClient>(
         Ok(row) => row_to_row_data(row, &column_names),
         Err(error) => Err(error.to_string()),
     });
-    Ok((column_types, stream))
+    Ok((
+        SnapshotTableMetadata {
+            column_types,
+            postgres_types,
+        },
+        stream,
+    ))
 }
 
 fn row_to_row_data(row: Row, columns: &[Arc<str>]) -> Result<RowData, String> {
@@ -468,10 +489,89 @@ fn row_to_row_data(row: Row, columns: &[Arc<str>]) -> Result<RowData, String> {
     Ok(data)
 }
 
+fn persist_snapshot_batch(
+    store: &Arc<ReplicationMdbxStore>,
+    source_table: &str,
+    rows: Vec<RowData>,
+    plan: &crate::sync_rules::RustExecutionPlan,
+    metadata: &SnapshotTableMetadata,
+) -> Result<(), String> {
+    let has_data_plan = plan.table_plan(source_table).is_some()
+        || source_table
+            .rsplit_once('.')
+            .is_some_and(|(_, table)| plan.table_plan(table).is_some());
+    if has_data_plan {
+        store
+            .persist_initial_snapshot_rows_with_presorted_columns_and_types(
+                source_table,
+                rows,
+                PostgresLsn(0),
+                plan,
+                &metadata.column_types,
+            )
+            .map_err(|error| format!("persist initial snapshot batch: {error}"))
+    } else {
+        store
+            .persist_initial_snapshot_lookup_rows(source_table, rows, PostgresLsn(0), plan)
+            .map_err(|error| format!("persist initial snapshot lookup batch: {error}"))
+    }
+}
+
+fn validate_lookup_table_columns(
+    source_table: &str,
+    lookup_table: &CompiledLookupTablePlan,
+    metadata: &SnapshotTableMetadata,
+) -> Result<(), String> {
+    if !metadata.postgres_types.contains_key("id") {
+        return Err(format!(
+            "parameter lookup table {source_table} is missing required id column id"
+        ));
+    }
+
+    // The id column, key, selected, AND row-predicate columns must all be
+    // text-family: the snapshot stringifies values through ::text while the
+    // WAL path carries pgoutput text output, and the two only agree
+    // byte-for-byte for text-family columns (booleans, for example, arrive as
+    // `true` vs `t`). The id column keys the lookup row documents, so a
+    // divergent id representation would orphan snapshot entries on the first
+    // replicated update.
+    let mut required_columns = BTreeSet::from(["id".to_owned()]);
+    for lookup in &lookup_table.lookups {
+        required_columns.extend(lookup.referenced_columns());
+    }
+    for column in required_columns {
+        let Some(postgres_type) = metadata.postgres_types.get(&column) else {
+            return Err(format!(
+                "parameter lookup table {source_table} is missing required column {column}"
+            ));
+        };
+        if !matches!(
+            postgres_type.to_ascii_lowercase().as_str(),
+            "text" | "varchar"
+        ) {
+            return Err(format!(
+                "parameter lookup table {source_table} column {column} has unsupported postgresql type {postgres_type}; only text and varchar are supported"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn unqualified_table(name: &str) -> &str {
+    name.strip_prefix("public.").unwrap_or(name)
+}
+
 #[derive(Debug, Clone)]
 struct SnapshotTableColumn {
     name: String,
     json_type: JsonColumnType,
+    postgres_type: String,
+}
+
+#[derive(Debug, Clone)]
+struct SnapshotTableMetadata {
+    column_types: JsonColumnTypes,
+    postgres_types: std::collections::BTreeMap<String, String>,
 }
 
 async fn table_columns<C: GenericClient>(
@@ -497,6 +597,7 @@ async fn table_columns<C: GenericClient>(
             SnapshotTableColumn {
                 name,
                 json_type: json_column_type_from_postgres_type(&udt_name),
+                postgres_type: udt_name,
             }
         })
         .collect())
@@ -548,7 +649,8 @@ fn order_by_clause(columns: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sync_rules::execution_plan;
+    use crate::sync_rules::{execution_plan, parse_parameter_lookup_plan};
+    use std::collections::BTreeMap;
 
     #[test]
     fn bootstrap_intent_is_stable_scoped_and_credential_opaque() {
@@ -588,5 +690,59 @@ mod tests {
             execution_plan(),
         );
         assert_ne!(first, initial_snapshot_bootstrap_intent(&different_source));
+    }
+
+    #[test]
+    fn lookup_snapshot_validation_rejects_non_text_columns_and_missing_id() {
+        let lookup = CompiledLookupTablePlan {
+            source_table: "public.memberships".to_owned(),
+            lookups: vec![parse_parameter_lookup_plan(
+                "SELECT workspace_id FROM memberships WHERE team_id = auth.user_id()",
+            )
+            .expect("lookup plan")],
+        };
+        let metadata = SnapshotTableMetadata {
+            column_types: JsonColumnTypes::new(),
+            postgres_types: BTreeMap::from([
+                ("id".to_owned(), "text".to_owned()),
+                ("team_id".to_owned(), "uuid".to_owned()),
+                ("workspace_id".to_owned(), "text".to_owned()),
+            ]),
+        };
+        let error = validate_lookup_table_columns("public.memberships", &lookup, &metadata)
+            .expect_err("uuid lookup keys must fail closed");
+        assert_eq!(
+            error,
+            "parameter lookup table public.memberships column team_id has unsupported postgresql type uuid; only text and varchar are supported"
+        );
+
+        let missing_id = SnapshotTableMetadata {
+            column_types: JsonColumnTypes::new(),
+            postgres_types: BTreeMap::from([
+                ("team_id".to_owned(), "text".to_owned()),
+                ("workspace_id".to_owned(), "text".to_owned()),
+            ]),
+        };
+        let error = validate_lookup_table_columns("public.memberships", &lookup, &missing_id)
+            .expect_err("lookup tables require id");
+        assert_eq!(
+            error,
+            "parameter lookup table public.memberships is missing required id column id"
+        );
+
+        let non_text_id = SnapshotTableMetadata {
+            column_types: JsonColumnTypes::new(),
+            postgres_types: BTreeMap::from([
+                ("id".to_owned(), "bool".to_owned()),
+                ("team_id".to_owned(), "text".to_owned()),
+                ("workspace_id".to_owned(), "text".to_owned()),
+            ]),
+        };
+        let error = validate_lookup_table_columns("public.memberships", &lookup, &non_text_id)
+            .expect_err("lookup row identity must be text-family");
+        assert_eq!(
+            error,
+            "parameter lookup table public.memberships column id has unsupported postgresql type bool; only text and varchar are supported"
+        );
     }
 }

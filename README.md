@@ -19,7 +19,7 @@ The implemented path covers:
 - a constrained compiler for the sync-rule forms used by the benchmark fixture;
 - an initial PostgreSQL scan tied to an exported logical-replication snapshot;
 - logical replication for inserts, updates, and deletes;
-- MDBX layouts for current bucket state, ordered tail operations, routing indexes, and checkpoint accumulators;
+- MDBX layouts for current bucket state, ordered tail operations, routing indexes, parameter lookups, and checkpoint accumulators;
 - initial and incremental `/sync/stream` responses for the supported request forms;
 - JWT-derived routed subscriptions, including parameter-query buckets;
 - exact count, checksum, operation-digest, authorization, and churn checks for selected buckets.
@@ -35,13 +35,15 @@ Out of scope:
 
 Unsupported layout-changing rule activation, publication transformations, and `TRUNCATE` fail closed. Publication coverage is validated at each bootstrap, not continuously; a publication altered while the service is streaming is rejected at the next restart. The full boundary is documented in [scope](docs/scope.md), [correctness](docs/correctness.md), and [security](SECURITY.md).
 
-Deleting the complete state directory outside the managed reset path also deletes cursor-epoch history; clients must discard saved cursors after that operator action. Parameter queries are concurrency-, time-, and row-bounded but currently open one PostgreSQL connection per evaluation rather than using a pool.
+Deleting the complete state directory outside the managed reset path also deletes cursor-epoch history; clients must discard saved cursors after that operator action.
+
+Table-backed parameter queries are materialized from the replication stream into MDBX and resolved with in-process reads at request time; no PostgreSQL connection is opened on the `/sync/stream` path. Bucket membership is still resolved once per request, so a change to access rows takes effect on the client's next reconnect, not mid-stream. A compile-time grammar restricts these queries to equality-keyed lookups against one public-schema table with text-family columns, failing closed on anything wider.
 
 ## Design
 
 The logical slot exports the MVCC snapshot used by the initial scan. Replication then resumes from the slot's consistent point, closing the scan-to-WAL handoff gap.
 
-MDBX holds the materialized state and replication tail in one local environment. Writes update current entries, routing indexes, ordered tail operations, and checkpoint accumulators transactionally. Each `/sync/stream` checkpoint pass reads all requested buckets in one short MDBX transaction, encodes pages lazily, and applies entry, byte, concurrency, and admission-time limits.
+MDBX holds the materialized state and replication tail in one local environment. Writes update current entries, routing indexes, parameter-lookup entries, ordered tail operations, and checkpoint accumulators transactionally. Each `/sync/stream` checkpoint pass reads all requested buckets in one short MDBX transaction, encodes pages lazily, and applies entry, byte, concurrency, and admission-time limits.
 
 Bootstrap state includes the PostgreSQL source, slot, rules, snapshot marker, durable LSN, and cursor epoch. In unified mode, readiness opens only after the bootstrap is durable, source identity and publication coverage are revalidated, and logical replication is connected; it closes when the replication runner exits. An interrupted bootstrap can be reset only when its durable intent matches the inactive slot and source configuration.
 
@@ -53,7 +55,7 @@ Initial materialization is one naturally serial write stream: a snapshot scan fo
 
 MDBX fits the shape of that stream. It is a memory-mapped B-tree with single-writer, multi-reader MVCC and durable copy-on-write commits: the replication stream is the one writer, checkpoint passes run as parallel read transactions that never block ingest, and key order directly serves the ordered bucket and tail range reads behind `/sync/stream`. There is no separate storage write-ahead log and no background compaction. Durability is not relaxed to gain speed; every commit runs under `SyncMode::Durable`, and the initial scan amortizes that cost by committing one transaction per 10,000-row batch rather than per row or per operation.
 
-The initial scan also writes less than the steady-state path. Snapshot rows produce current-state documents and routing-index entries only; per-operation tail history starts at the replication handoff. Checkpoint counts and checksums are maintained as incremental accumulators inside the same transactions, so serving a checkpoint never rescans bucket contents.
+The initial scan also writes less than the steady-state path. Snapshot rows produce current-state documents, routing-index entries, and, for lookup tables, parameter-lookup entries; per-operation tail history starts at the replication handoff. Checkpoint counts and checksums are maintained as incremental accumulators inside the same transactions, so serving a checkpoint never rescans bucket contents.
 
 Rust is there for the per-row loop and the memory profile. Decoding, rule evaluation, JSON normalization, and checksum accumulation run once per source row, more than five million times at the largest canary rung, without a garbage-collected runtime in the loop and with allocation under the implementation's control. Bounded streaming batches keep peak memory between 76 and 111 MiB across the rungs, and the service starts as one native process, which keeps its share of the measured startup-to-readiness window small.
 
@@ -138,7 +140,7 @@ npm --prefix e2e/official-sdk run build
 cargo audit
 ```
 
-The six ignored live-replication tests require PostgreSQL with logical WAL enabled. The repository CI configuration shows the required database setup, but the checks above can all be run locally.
+The four ignored live-replication tests require PostgreSQL with logical WAL enabled. The repository CI configuration shows the required database setup, but the checks above can all be run locally.
 
 ## Benchmark workflow
 
@@ -182,7 +184,7 @@ POWERSYNC_USER_VALUE_RETAIN_RAW_RECORDS=1 \
 node scripts/user_value_benchmark.mjs
 ```
 
-This command uses the recorded canary allocation: 1.5 CPU/2 GiB for the service and 2.5 CPU/6 GiB for MongoDB, with a 2 GiB WiredTiger cache.
+This command uses the recorded canary allocation.
 
 Calibrate the official service/MongoDB CPU split at 250k before an expensive matrix:
 
@@ -198,7 +200,7 @@ Run the bounded release ladder from a clean worktree:
 node scripts/linux_canary_ladder.mjs
 ```
 
-The ladder builds the Rust image, pins the official service, MongoDB, and PostgreSQL images, stops on the first failure, checks compressed raw records and resource evidence, and writes an append-only manifest under `tmp/linux-canary-ladder/`. It requires a Linux Docker server and checks for 150 GiB of free disk before the 5m rung. It is a correctness and scale-safety gate, not a statistical performance matrix. The current canary took 18 minutes 44 seconds and retained about 13 GiB of local artifacts.
+The ladder builds the Rust image, pins the official service, MongoDB, and PostgreSQL images, stops on the first failure, checks compressed raw records and resource evidence, and writes an append-only manifest under `tmp/linux-canary-ladder/`. It requires a Linux Docker server and checks for 150 GiB of free disk before the 5m rung. It is a correctness and scale-safety gate, not a statistical performance matrix.
 
 The current harness records three initial-replication boundaries concurrently:
 

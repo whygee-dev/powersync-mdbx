@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     future::Future,
     path::Path,
     pin::Pin,
@@ -88,6 +89,17 @@ impl Storage for WireMdbxStorage {
         encoding: StreamEncoding,
     ) -> Result<SyncChunkSource, StorageError> {
         self.dynamic_task_tail_source_for_buckets(buckets, plan, encoding)
+    }
+
+    fn read_parameter_lookup_rows(
+        &self,
+        lookup_id: &str,
+        key_values: &[String],
+        max_entries: usize,
+    ) -> Result<Vec<BTreeMap<String, String>>, StorageError> {
+        self.ingest_store
+            .read_parameter_lookup_rows(lookup_id, key_values, max_entries)
+            .map_err(|error| StorageError(format!("failed to read parameter lookup rows: {error}")))
     }
 
     fn latest_sync_bucket_cursors_with_plan(

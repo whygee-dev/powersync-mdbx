@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use sha2::{Digest as _, Sha256};
 
 use super::catalog::{
     canonical_storage_contract_id, contract_fingerprint, CANONICAL_PLAN_VERSION,
@@ -10,17 +11,19 @@ use super::eval::{merged_bucket_parameters_from_queries, stream_bucket_groups};
 use super::model::{
     AccumulatorQueryTemplate, CanonicalBinding, CanonicalBucketParameter,
     CanonicalComputedExpression, CanonicalComputedTerm, CanonicalDataQuery, CanonicalProjection,
-    CanonicalSemanticPlan, CanonicalStream, CompiledTablePlan, RustExecutionPlan, StreamDefinition,
-    SyncRuleError,
+    CanonicalSemanticPlan, CanonicalStream, CompiledLookupTablePlan, CompiledTablePlan,
+    LiteralValue, Operand, ParameterLookupPlan, ParameterLookupSelectedColumn, Predicate,
+    RustExecutionPlan, StreamDefinition, SyncRuleError,
 };
 use super::query::{
     contains_binding_reference, is_request_filter_predicate, is_row_filter_predicate,
     json_each_alias, last_dotted_identifier, normalize_identifier, parse_binding,
-    parse_stream_query, split_and_predicates, split_ascii_case_insensitive_once,
-    split_or_predicates, split_top_level_csv, strip_arrow_string_argument, trim_wrapping_parens,
-    ParsedStreamQuery,
+    parse_stream_query, split_and_predicates, split_ascii_case_insensitive_once, split_is_null,
+    split_or_predicates, split_top_level_csv, sql_literal_to_json, strip_arrow_string_argument,
+    trim_wrapping_parens, ParsedStreamQuery,
 };
 use super::yaml::parse_sync_rules_source;
+use serde::Serialize;
 
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
 pub(super) struct ParsedParameterQuery {
@@ -105,6 +108,7 @@ pub fn lower_canonical_semantic_plan(
 
     let mut streams_by_name = HashMap::new();
     let mut tables_by_source: HashMap<String, CompiledTablePlan> = HashMap::new();
+    let mut lookup_tables_by_source: BTreeMap<String, CompiledLookupTablePlan> = BTreeMap::new();
     let mut route_index_columns_by_object: HashMap<String, Vec<Vec<String>>> = HashMap::new();
     let mut stream_bucket_groups_by_name = HashMap::new();
     let mut accumulator_queries_by_object: HashMap<String, Vec<AccumulatorQueryTemplate>> =
@@ -114,6 +118,8 @@ pub fn lower_canonical_semantic_plan(
 
     for stream in &canonical.streams {
         let data_queries = stream.data_queries();
+
+        validate_parameter_lookup_request_filters(stream)?;
 
         if streams_by_name
             .insert(stream.name.clone(), stream.clone())
@@ -140,6 +146,26 @@ pub fn lower_canonical_semantic_plan(
         }
 
         for query in data_queries {
+            for parameter in &query.bucket_parameters {
+                let CanonicalBinding::ParameterQueryColumn { lookup, .. } = &parameter.binding
+                else {
+                    continue;
+                };
+                let table = lookup_tables_by_source
+                    .entry(lookup.source_table.clone())
+                    .or_insert_with(|| CompiledLookupTablePlan {
+                        source_table: lookup.source_table.clone(),
+                        lookups: Vec::new(),
+                    });
+                if !table
+                    .lookups
+                    .iter()
+                    .any(|existing| existing.lookup_id == lookup.lookup_id)
+                {
+                    table.lookups.push((**lookup).clone());
+                }
+            }
+
             accumulator_queries_by_object
                 .entry(query.output_table.clone())
                 .or_default()
@@ -215,6 +241,7 @@ pub fn lower_canonical_semantic_plan(
         canonical,
         streams_by_name,
         tables_by_source,
+        lookup_tables_by_source,
         route_index_columns_by_object,
         stream_bucket_groups_by_name,
         accumulator_queries_by_object,
@@ -339,6 +366,462 @@ pub(super) fn parse_parameter_query(query: &str) -> ParsedParameterQuery {
     parsed
 }
 
+pub fn parse_parameter_lookup_plan(raw: &str) -> Result<ParameterLookupPlan, SyncRuleError> {
+    let raw_query = raw.trim().to_owned();
+    let upper = raw_query.to_ascii_uppercase();
+    if !upper.starts_with("SELECT ") {
+        return Err(SyncRuleError(format!(
+            "parameter lookup query must start with SELECT: {raw_query}"
+        )));
+    }
+
+    let from_index = upper.find(" FROM ").ok_or_else(|| {
+        SyncRuleError(format!(
+            "parameter lookup query is missing FROM: {raw_query}"
+        ))
+    })?;
+    let where_start = from_index + " FROM ".len();
+    let where_index = upper[where_start..]
+        .find(" WHERE ")
+        .map(|index| where_start + index)
+        .ok_or_else(|| {
+            SyncRuleError(format!(
+                "parameter lookup query is missing WHERE: {raw_query}"
+            ))
+        })?;
+
+    let select_clause = if from_index <= "SELECT ".len() {
+        ""
+    } else {
+        raw_query["SELECT ".len()..from_index].trim()
+    };
+    if select_clause.is_empty() {
+        return Err(SyncRuleError(
+            "parameter lookup query SELECT list must not be empty".to_owned(),
+        ));
+    }
+    let selected = split_top_level_csv(select_clause)
+        .into_iter()
+        .map(parse_lookup_projection)
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let from_clause = raw_query[where_start..where_index].trim();
+    let from_items = split_top_level_csv(from_clause);
+    if from_items.len() != 1
+        || from_clause.to_ascii_lowercase().contains("json_each")
+        || from_clause.to_ascii_lowercase().contains(" join ")
+        || from_clause.contains('(')
+    {
+        if from_clause.to_ascii_lowercase().contains("json_each") {
+            return Err(SyncRuleError(
+                "json_each is not supported inside table-backed parameter lookup queries"
+                    .to_owned(),
+            ));
+        }
+        if from_clause.contains('(') {
+            return Err(SyncRuleError(
+                "sub-selects are not supported in parameter lookup queries".to_owned(),
+            ));
+        }
+        return Err(SyncRuleError(
+            "parameter lookup queries must have exactly one table and no joins".to_owned(),
+        ));
+    }
+    let table_tokens = from_clause.split_whitespace().collect::<Vec<_>>();
+    if table_tokens.len() != 1 {
+        return Err(SyncRuleError(
+            "parameter lookup queries must have exactly one table and no joins".to_owned(),
+        ));
+    }
+    let source_table = normalize_identifier(table_tokens[0])
+        .strip_prefix("public.")
+        .map(str::to_owned)
+        .unwrap_or_else(|| normalize_identifier(table_tokens[0]));
+    if source_table.is_empty() {
+        return Err(SyncRuleError(
+            "parameter lookup query FROM table must not be empty".to_owned(),
+        ));
+    }
+    // The WAL path only observes public-schema change events, so a lookup
+    // table outside public would silently miss churn; reject it up front.
+    if source_table.contains('.') {
+        return Err(SyncRuleError(format!(
+            "parameter lookup tables must be unqualified or in the public schema: {source_table}"
+        )));
+    }
+
+    let where_clause = raw_query[where_index + " WHERE ".len()..].trim();
+    if where_clause.is_empty() {
+        return Err(SyncRuleError(
+            "parameter lookup query WHERE clause must not be empty".to_owned(),
+        ));
+    }
+
+    let mut key_bindings = BTreeMap::new();
+    let mut row_predicates = Vec::new();
+    for predicate in split_and_predicates(where_clause) {
+        let predicate = trim_wrapping_parens(predicate.trim());
+        if predicate.to_ascii_lowercase().contains("(select") {
+            return Err(SyncRuleError(
+                "sub-selects are not supported in parameter lookup queries".to_owned(),
+            ));
+        }
+        if split_or_predicates(predicate).len() > 1 {
+            return Err(SyncRuleError(format!(
+                "OR is not supported in parameter lookup queries: {predicate}"
+            )));
+        }
+        if split_ascii_case_insensitive_once(predicate, " IN ").is_some() {
+            return Err(SyncRuleError(format!(
+                "IN is not supported in parameter lookup queries: {predicate}"
+            )));
+        }
+
+        let comparison = predicate.replace("->>", "");
+        if comparison.contains('>') || comparison.contains('<') || comparison.contains("!=") {
+            return Err(SyncRuleError(format!(
+                "non-equality comparison is not supported in parameter lookup queries: {predicate}"
+            )));
+        }
+
+        if let Some((operand, negated)) = split_is_null(predicate) {
+            if parse_binding(operand.trim()).is_some() {
+                return Err(SyncRuleError(format!(
+                    "request IS [NOT] NULL predicates are not supported in parameter lookup queries: {predicate}"
+                )));
+            }
+            let column = lookup_column_name(operand, predicate)?;
+            row_predicates.push(Predicate::IsNull {
+                operand: Operand::Column { name: column },
+                negated,
+            });
+            continue;
+        }
+
+        let Some((left, right)) = predicate.split_once('=') else {
+            return Err(SyncRuleError(format!(
+                "unsupported predicate in parameter lookup query: {predicate}"
+            )));
+        };
+        let left = left.trim();
+        let right = right.trim();
+        let left_binding = parse_binding(left);
+        let right_binding = parse_binding(right);
+
+        match (left_binding, right_binding) {
+            (Some(_), Some(_)) => {
+                return Err(SyncRuleError(format!(
+                    "binding = binding is not supported in parameter lookup queries: {predicate}"
+                )))
+            }
+            (Some(binding), None) | (None, Some(binding)) => {
+                let binding_expression = if parse_binding(left).is_some() {
+                    left
+                } else {
+                    right
+                };
+                let other = if parse_binding(left).is_some() {
+                    right
+                } else {
+                    left
+                };
+                if !is_lookup_binding_expression(binding_expression) {
+                    return Err(SyncRuleError(format!(
+                        "unsupported binding in parameter lookup query: {predicate}"
+                    )));
+                }
+                if sql_literal_to_json(other).is_some() {
+                    if !is_lookup_request_binding(&binding) {
+                        return Err(SyncRuleError(format!(
+                            "unsupported binding in parameter lookup query: {predicate}"
+                        )));
+                    }
+                    continue;
+                }
+                let column = lookup_column_name(other, predicate)?;
+                if !is_lookup_key_binding(&binding) {
+                    return Err(SyncRuleError(format!(
+                        "unsupported binding in parameter lookup query: {predicate}"
+                    )));
+                }
+                if key_bindings.insert(column.clone(), binding).is_some() {
+                    return Err(SyncRuleError(format!(
+                        "duplicate binding column {column} in parameter lookup query"
+                    )));
+                }
+            }
+            (None, None) => {
+                let left_value = sql_literal_to_json(left);
+                let right_value = sql_literal_to_json(right);
+                let (column, value, column_on_left) = match (left_value, right_value) {
+                    (None, Some(value)) => (lookup_column_name(left, predicate)?, value, true),
+                    (Some(value), None) => (lookup_column_name(right, predicate)?, value, false),
+                    _ => {
+                        return Err(SyncRuleError(format!(
+                            "row predicates in parameter lookup queries must compare a column to a string literal: {predicate}"
+                        )))
+                    }
+                };
+                let value = literal_value(value)?;
+                if !matches!(value, LiteralValue::String(_)) {
+                    return Err(SyncRuleError(format!(
+                        "row predicates in parameter lookup queries must compare a column to a string literal: {predicate}"
+                    )));
+                }
+                let literal = Operand::Literal { value };
+                let column = Operand::Column { name: column };
+                row_predicates.push(Predicate::Eq {
+                    left: if column_on_left {
+                        column.clone()
+                    } else {
+                        literal.clone()
+                    },
+                    right: if column_on_left { literal } else { column },
+                });
+            }
+        }
+    }
+
+    if key_bindings.is_empty() {
+        return Err(SyncRuleError(
+            "parameter lookup query must contain at least one key binding".to_owned(),
+        ));
+    }
+    let key_bindings = key_bindings.into_iter().collect::<Vec<_>>();
+    let row_predicate = combine_lookup_predicates(row_predicates);
+    let lookup_id = lookup_id(
+        &raw_query,
+        &source_table,
+        &selected,
+        &key_bindings,
+        &row_predicate,
+    );
+    Ok(ParameterLookupPlan {
+        raw_query,
+        source_table,
+        selected,
+        key_bindings,
+        row_predicate,
+        lookup_id,
+    })
+}
+
+fn parse_lookup_projection(item: &str) -> Result<ParameterLookupSelectedColumn, SyncRuleError> {
+    let alias = projection_alias(item).ok_or_else(|| {
+        SyncRuleError(format!(
+            "unsupported SELECT item in parameter lookup query: {}",
+            item.trim()
+        ))
+    })?;
+    let source = split_ascii_case_insensitive_once(item, " AS ")
+        .map(|(source, _)| source)
+        .unwrap_or(item);
+    let column = normalize_identifier(last_dotted_identifier(source));
+    if !is_lookup_identifier(&column) {
+        return Err(SyncRuleError(format!(
+            "unsupported SELECT item in parameter lookup query: {}",
+            item.trim()
+        )));
+    }
+    Ok(ParameterLookupSelectedColumn { alias, column })
+}
+
+fn lookup_column_name(value: &str, predicate: &str) -> Result<String, SyncRuleError> {
+    let column = normalize_identifier(last_dotted_identifier(value));
+    if !is_lookup_identifier(&column) {
+        return Err(SyncRuleError(format!(
+            "unsupported column in parameter lookup predicate: {predicate}"
+        )));
+    }
+    Ok(column)
+}
+
+fn is_lookup_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value.split('.').all(|part| {
+            !part.is_empty()
+                && ((part.starts_with('"') && part.ends_with('"'))
+                    || part.chars().all(|character| {
+                        character.is_ascii_alphanumeric()
+                            || matches!(character, '_' | '"')
+                            || character.is_ascii_whitespace()
+                    }))
+        })
+}
+
+fn is_lookup_key_binding(binding: &CanonicalBinding) -> bool {
+    matches!(
+        binding,
+        CanonicalBinding::AuthParameter { .. }
+            | CanonicalBinding::SubscriptionParameter { .. }
+            | CanonicalBinding::RequestUserId
+            | CanonicalBinding::RequestParameter { .. }
+    )
+}
+
+fn is_lookup_binding_expression(value: &str) -> bool {
+    let value = value.trim();
+    value.eq_ignore_ascii_case("auth.user_id()")
+        || value.to_ascii_lowercase().starts_with("auth.parameter(")
+        || value
+            .to_ascii_lowercase()
+            .starts_with("subscription.parameter(")
+        || value
+            .to_ascii_lowercase()
+            .starts_with("request.parameters() ->> ")
+        || value
+            .to_ascii_lowercase()
+            .starts_with("connection.parameters() ->> ")
+}
+
+fn is_lookup_request_binding(binding: &CanonicalBinding) -> bool {
+    matches!(
+        binding,
+        CanonicalBinding::AuthParameter { .. }
+            | CanonicalBinding::SubscriptionParameter { .. }
+            | CanonicalBinding::RequestUserId
+            | CanonicalBinding::RequestJwt { .. }
+            | CanonicalBinding::RequestParameter { .. }
+    )
+}
+
+fn literal_value(value: serde_json::Value) -> Result<LiteralValue, SyncRuleError> {
+    match value {
+        serde_json::Value::String(value) => Ok(LiteralValue::String(value)),
+        serde_json::Value::Number(value) => value
+            .as_i64()
+            .map(LiteralValue::Integer)
+            .ok_or_else(|| SyncRuleError("unsupported numeric SQL literal".to_owned())),
+        serde_json::Value::Bool(value) => Ok(LiteralValue::Boolean(value)),
+        serde_json::Value::Null => Ok(LiteralValue::Null),
+        _ => Err(SyncRuleError("unsupported SQL literal".to_owned())),
+    }
+}
+
+fn combine_lookup_predicates(predicates: Vec<Predicate>) -> Option<Predicate> {
+    match predicates.len() {
+        0 => None,
+        1 => predicates.into_iter().next(),
+        _ => Some(Predicate::And { terms: predicates }),
+    }
+}
+
+#[derive(Serialize)]
+struct LookupIdInput<'a> {
+    raw_query: &'a str,
+    source_table: &'a str,
+    selected: &'a [ParameterLookupSelectedColumn],
+    key_bindings: &'a [(String, CanonicalBinding)],
+    row_predicate: &'a Option<Predicate>,
+}
+
+fn lookup_id(
+    raw_query: &str,
+    source_table: &str,
+    selected: &[ParameterLookupSelectedColumn],
+    key_bindings: &[(String, CanonicalBinding)],
+    row_predicate: &Option<Predicate>,
+) -> String {
+    let input = LookupIdInput {
+        raw_query,
+        source_table,
+        selected,
+        key_bindings,
+        row_predicate,
+    };
+    Sha256::digest(serde_json::to_vec(&input).expect("parameter lookup plan should serialize"))
+        .iter()
+        .take(8)
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn lookup_request_predicates(raw: &str) -> Result<Vec<Predicate>, SyncRuleError> {
+    let trimmed = raw.trim();
+    let upper = trimmed.to_ascii_uppercase();
+    let from_index = upper
+        .find(" FROM ")
+        .ok_or_else(|| SyncRuleError("parameter lookup query is missing FROM".to_owned()))?;
+    let where_start = from_index + " FROM ".len();
+    let where_index = upper[where_start..]
+        .find(" WHERE ")
+        .map(|index| where_start + index)
+        .ok_or_else(|| SyncRuleError("parameter lookup query is missing WHERE".to_owned()))?;
+    let where_clause = trimmed[where_index + " WHERE ".len()..].trim();
+    let mut predicates = Vec::new();
+    for term in split_and_predicates(where_clause) {
+        let term = trim_wrapping_parens(term.trim());
+        let Some((left, right)) = term.split_once('=') else {
+            continue;
+        };
+        let left = left.trim();
+        let right = right.trim();
+        let (binding, literal, binding_on_left) =
+            match (parse_binding(left), sql_literal_to_json(right)) {
+                (Some(binding), Some(literal)) => (binding, literal, true),
+                _ => match (sql_literal_to_json(left), parse_binding(right)) {
+                    (Some(literal), Some(binding)) => (binding, literal, false),
+                    _ => continue,
+                },
+            };
+        if !is_lookup_request_binding(&binding) {
+            continue;
+        }
+        let binding = Operand::Binding { binding };
+        let literal = Operand::Literal {
+            value: literal_value(literal)?,
+        };
+        predicates.push(Predicate::Eq {
+            left: if binding_on_left {
+                binding.clone()
+            } else {
+                literal.clone()
+            },
+            right: if binding_on_left { literal } else { binding },
+        });
+    }
+    Ok(predicates)
+}
+
+fn flattened_predicates(predicate: Option<&Predicate>) -> Vec<&Predicate> {
+    fn flatten<'a>(predicate: &'a Predicate, output: &mut Vec<&'a Predicate>) {
+        if let Predicate::And { terms } = predicate {
+            for term in terms {
+                flatten(term, output);
+            }
+        } else {
+            output.push(predicate);
+        }
+    }
+    let mut output = Vec::new();
+    if let Some(predicate) = predicate {
+        flatten(predicate, &mut output);
+    }
+    output
+}
+
+fn validate_parameter_lookup_request_filters(
+    stream: &CanonicalStream,
+) -> Result<(), SyncRuleError> {
+    for group in stream_bucket_groups(stream) {
+        let group_terms = flattened_predicates(group.request_filter.as_ref());
+        for parameter in &group.bucket_parameters {
+            let CanonicalBinding::ParameterQueryColumn { lookup, .. } = &parameter.binding else {
+                continue;
+            };
+            for predicate in lookup_request_predicates(&lookup.raw_query)? {
+                if !group_terms.iter().any(|term| **term == predicate) {
+                    return Err(SyncRuleError(format!(
+                        "parameter lookup request predicate is not mirrored in stream {} bucket group {}",
+                        stream.name, group.index
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn json_each_request_bindings(from_part: &str) -> BTreeMap<String, CanonicalBinding> {
     let mut bindings = BTreeMap::new();
     let mut unaliased_count = 0_usize;
@@ -436,7 +919,7 @@ pub(super) fn normalize_data_query_with_parameters(
     }
     for predicate in split_and_predicates(where_part) {
         if let Some(rewritten) =
-            rewrite_bucket_join_predicate(predicate, &cte_alias, parameter_query)
+            rewrite_bucket_join_predicate(predicate, &cte_alias, parameter_query)?
         {
             predicates.push(rewritten);
         } else if parse_direct_parameter_predicate(predicate).is_some()
@@ -527,12 +1010,14 @@ fn rewrite_bucket_join_predicate(
     predicate: &str,
     cte_alias: &str,
     parameter_query: &ParsedParameterQuery,
-) -> Option<String> {
+) -> Result<Option<String>, SyncRuleError> {
     let (left, right, operator) =
         if let Some((left, right)) = split_ascii_case_insensitive_once(predicate, " IN ") {
             (left, right, "IN")
         } else {
-            let (left, right) = predicate.split_once('=')?;
+            let Some((left, right)) = predicate.split_once('=') else {
+                return Ok(None);
+            };
             (left, right, "=")
         };
     let left_bucket = bucket_alias_column(left, cte_alias);
@@ -540,40 +1025,39 @@ fn rewrite_bucket_join_predicate(
     match (left_bucket, right_bucket) {
         (Some(bucket_column), None) => {
             let source_column = normalize_identifier(last_dotted_identifier(right));
-            let binding = parameter_query
-                .columns
-                .get(&bucket_column)
-                .and_then(Clone::clone)
-                .unwrap_or(CanonicalBinding::ParameterQueryColumn {
-                    name: bucket_column.clone(),
-                    query: parameter_query.query.clone(),
-                });
-            Some(format_bucket_predicate(
+            let binding = parameter_query_binding(parameter_query, &bucket_column)?;
+            Ok(Some(format_bucket_predicate(
                 &source_column,
                 &binding,
                 operator,
                 false,
-            ))
+            )))
         }
         (None, Some(bucket_column)) => {
             let source_column = normalize_identifier(last_dotted_identifier(left));
-            let binding = parameter_query
-                .columns
-                .get(&bucket_column)
-                .and_then(Clone::clone)
-                .unwrap_or(CanonicalBinding::ParameterQueryColumn {
-                    name: bucket_column.clone(),
-                    query: parameter_query.query.clone(),
-                });
-            Some(format_bucket_predicate(
+            let binding = parameter_query_binding(parameter_query, &bucket_column)?;
+            Ok(Some(format_bucket_predicate(
                 &source_column,
                 &binding,
                 operator,
                 true,
-            ))
+            )))
         }
-        _ => None,
+        _ => Ok(None),
     }
+}
+
+fn parameter_query_binding(
+    parameter_query: &ParsedParameterQuery,
+    column: &str,
+) -> Result<CanonicalBinding, SyncRuleError> {
+    if let Some(binding) = parameter_query.columns.get(column).and_then(Clone::clone) {
+        return Ok(binding);
+    }
+    Ok(CanonicalBinding::ParameterQueryColumn {
+        name: column.to_owned(),
+        lookup: Box::new(parse_parameter_lookup_plan(&parameter_query.query)?),
+    })
 }
 
 fn format_bucket_predicate(
@@ -626,11 +1110,11 @@ fn binding_sql_fragment(binding: &CanonicalBinding) -> String {
                 escape_sql_string_literal(name)
             )
         }
-        CanonicalBinding::ParameterQueryColumn { name, query } => {
+        CanonicalBinding::ParameterQueryColumn { name, lookup } => {
             // The query is URL-safe base64 (no quotes); the column name is escaped.
             format!(
                 "parameter_query_column('{}','{}')",
-                URL_SAFE_NO_PAD.encode(query),
+                URL_SAFE_NO_PAD.encode(&lookup.raw_query),
                 escape_sql_string_literal(name)
             )
         }

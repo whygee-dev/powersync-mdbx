@@ -11,9 +11,9 @@ use super::catalog::{bucket_name_for_stream_group, parse_bucket_values, STREAM_B
 use super::model::{
     AccumulatorQueryTemplate, CanonicalBinding, CanonicalBucketParameter,
     CanonicalComputedExpression, CanonicalComputedTerm, CanonicalProjectedColumn,
-    CanonicalProjection, CanonicalSemanticPlan, CanonicalStream, CompiledTablePlan, JsonColumnType,
-    JsonColumnTypes, Operand, Predicate, ResolvedSyncBucket, ResolvedSyncQuery, RustExecutionPlan,
-    StreamBucketGroup, SyncRuleError,
+    CanonicalProjection, CanonicalSemanticPlan, CanonicalStream, CompiledLookupTablePlan,
+    CompiledTablePlan, JsonColumnType, JsonColumnTypes, Operand, Predicate, ResolvedSyncBucket,
+    ResolvedSyncQuery, RustExecutionPlan, StreamBucketGroup, SyncRuleError,
 };
 
 impl ResolvedSyncBucket {
@@ -641,6 +641,22 @@ impl RustExecutionPlan {
 
     pub fn source_tables(&self) -> Vec<&CompiledTablePlan> {
         self.tables_by_source.values().collect()
+    }
+
+    pub fn lookup_source_tables(&self) -> Vec<&CompiledLookupTablePlan> {
+        self.lookup_tables_by_source.values().collect()
+    }
+
+    /// Resolve a lookup-table plan for a source-table name. Lookup tables are
+    /// compiled unqualified (the parser rejects non-public schemas), so a
+    /// `public.`-qualified caller name resolves to the unqualified plan and
+    /// any other schema resolves to nothing.
+    pub fn lookup_table_plan(&self, source_table: &str) -> Option<&CompiledLookupTablePlan> {
+        self.lookup_tables_by_source.get(source_table).or_else(|| {
+            source_table
+                .strip_prefix("public.")
+                .and_then(|table| self.lookup_tables_by_source.get(table))
+        })
     }
 
     pub fn required_route_indexes_for_row(

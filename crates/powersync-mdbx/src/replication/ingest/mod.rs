@@ -5,6 +5,7 @@ mod decoder;
 mod derive;
 mod error;
 mod keys;
+mod lookup_state;
 mod metrics;
 mod store;
 mod tail_log;

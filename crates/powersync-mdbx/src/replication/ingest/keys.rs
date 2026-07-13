@@ -26,6 +26,8 @@ const SYNC_TAIL_OP_KEY_PREFIX: &str = "sync:tail:op:";
 const SYNC_TAIL_REFS_KEY_PREFIX: &str = "sync:tail:refs:";
 const SYNC_TAIL_INDEX_ENTRY_KEY_PREFIX: &str = "sync:tail:index:entry:";
 pub(super) const SYNC_TAIL_CHECKPOINT_ACCUMULATOR_KEY_PREFIX: &str = "sync:tail:checkpoint:";
+const PARAMETER_LOOKUP_ROW_KEY_PREFIX: &str = "paramlookup:row:";
+const PARAMETER_LOOKUP_INDEX_KEY_PREFIX: &str = "paramlookup:idx:";
 
 pub(super) fn current_doc_prefix(object_type: &str) -> Vec<u8> {
     format!("{CURRENT_DOC_KEY_PREFIX}{object_type}:").into_bytes()
@@ -120,6 +122,34 @@ fn push_len_prefixed(output: &mut String, value: &str) {
     output.push(':');
     output.push_str(value);
     output.push('|');
+}
+
+pub(super) fn parameter_lookup_row_key(source_table: &str, row_id: &str) -> Vec<u8> {
+    let mut key = PARAMETER_LOOKUP_ROW_KEY_PREFIX.to_owned();
+    push_len_prefixed(&mut key, source_table);
+    push_len_prefixed(&mut key, row_id);
+    key.into_bytes()
+}
+
+pub(super) fn parameter_lookup_index_prefix(lookup_id: &str, key_values: &[&str]) -> Vec<u8> {
+    let mut key = PARAMETER_LOOKUP_INDEX_KEY_PREFIX.to_owned();
+    push_len_prefixed(&mut key, lookup_id);
+    for value in key_values {
+        push_len_prefixed(&mut key, value);
+    }
+    key.into_bytes()
+}
+
+pub(super) fn parameter_lookup_index_key(
+    lookup_id: &str,
+    key_values: &[&str],
+    row_id: &str,
+) -> Vec<u8> {
+    let mut key = parameter_lookup_index_prefix(lookup_id, key_values);
+    let mut suffix = String::new();
+    push_len_prefixed(&mut suffix, row_id);
+    key.extend_from_slice(suffix.as_bytes());
+    key
 }
 
 pub(super) fn sync_tail_index_entry_key(index_key: &str, global_op_id: u64) -> Vec<u8> {

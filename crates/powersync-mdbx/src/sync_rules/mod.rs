@@ -21,12 +21,17 @@ pub use catalog::{
     TASKS_BY_PROJECT_STREAM_NAME,
 };
 pub use eval::request_filter_matches;
-pub use lowering::{compile_streams, compile_sync_rules_source, lower_canonical_semantic_plan};
+pub use lowering::{
+    compile_streams, compile_sync_rules_source, lower_canonical_semantic_plan,
+    parse_parameter_lookup_plan,
+};
 pub use model::{
     CanonicalBinding, CanonicalBucketGroup, CanonicalBucketParameter, CanonicalComputedColumn,
     CanonicalComputedExpression, CanonicalComputedTerm, CanonicalDataQuery,
     CanonicalProjectedColumn, CanonicalProjection, CanonicalSemanticPlan, CanonicalStream,
-    CompiledTablePlan, JsonColumnType, JsonColumnTypes, ResolvedSyncBucket, ResolvedSyncQuery,
-    RustExecutionPlan, StreamDefinition, SyncBucketDescriptor, SyncRuleError,
+    CompiledLookupTablePlan, CompiledTablePlan, JsonColumnType, JsonColumnTypes, LiteralValue,
+    Operand, ParameterLookupPlan, ParameterLookupSelectedColumn, Predicate, ResolvedSyncBucket,
+    ResolvedSyncQuery, RustExecutionPlan, StreamDefinition, SyncBucketDescriptor, SyncRuleError,
 };
-pub(crate) use query::{json_each_alias, split_top_level_csv};
+#[cfg(test)]
+pub(crate) use query::split_top_level_csv;

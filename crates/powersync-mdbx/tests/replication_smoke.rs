@@ -11,10 +11,11 @@ use axum::{
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use hmac::{Hmac, Mac};
 use http_body_util::BodyExt;
+use pg_walstream::{ColumnValue, RowData};
 use powersync_mdbx::{
     auth::{TokenPayload, UserAuthConfig},
     build_app_with_storage_and_context,
-    control_plane::{ServiceContext, SourceConnection},
+    control_plane::{ResolvedParameterContext, ServiceContext},
     replication::{
         ingest::ReplicationMdbxStore,
         postgres::PostgresLsn,
@@ -26,6 +27,7 @@ use powersync_mdbx::{
         PostgresReplicationConfig,
     },
     storage::WireMdbxStorage,
+    sync_rules::{compile_sync_rules_source, lower_canonical_semantic_plan},
 };
 use sha2::Sha256;
 use tempfile::TempDir;
@@ -376,48 +378,15 @@ async fn hold_open_sync_stream_emits_follow_up_task_updates_via_live_replication
 }
 
 #[tokio::test]
-#[ignore = "requires a live PostgreSQL; run via cargo test --test replication_smoke -- --ignored"]
-async fn resolves_fixture_style_parameter_query_rows_from_postgres() {
-    let _guard = live_test_guard().await;
-    let context = LiveReplicationContext::new("rust_params", Some("\"Membership\"")).await;
-    recreate_membership_table(&context.client).await;
-
-    context
-        .client
-        .execute(
-            r#"
-            INSERT INTO "Membership" ("userId", "teamId", "workspaceId")
-            VALUES
-              ($1, $2, $3),
-              ($1, $2, $4),
-              ($5, $2, $6)
-            "#,
-            &[
-                &"user-1",
-                &"team-1",
-                &"ws-1",
-                &"ws-2",
-                &"other-user",
-                &"ws-3",
-            ],
-        )
-        .await
-        .expect("insert scope rows");
-
-    let service_context = ServiceContext::new_for_tests(
-        TempDir::new()
-            .expect("state temp directory")
-            .path()
-            .join("sync-rules-state.json"),
-        vec![],
-        None,
-        vec![SourceConnection {
-            id: "postgresql".to_owned(),
-            tag: "postgres".to_owned(),
-            uri: live_test_uri(),
-        }],
+async fn resolves_fixture_style_lookup_rows_from_mdbx() {
+    let plan = lower_canonical_semantic_plan(
+        compile_sync_rules_source(parameter_sync_rules()).expect("parameter rules should compile"),
     )
-    .expect("service context");
+    .expect("parameter rules should lower");
+    let lookup = &plan
+        .lookup_table_plan("Membership")
+        .expect("Membership lookup table plan")
+        .lookups[0];
     let token = TokenPayload::new_for_tests(
         serde_json::json!({"sub": "user-1"}),
         Some("user-1".to_owned()),
@@ -432,17 +401,29 @@ async fn resolves_fixture_style_parameter_query_rows_from_postgres() {
             serde_json::Value::String("team-1".to_owned()),
         ),
     ]);
-
-    let rows = service_context
-        .parameter_query_rows(
-            r#"SELECT "workspaceId" AS "workspaceId" FROM "Membership" WHERE connection.parameters() ->> 'schema_version' = 'web' AND "userId" = auth.user_id() AND "workspaceId" IS NOT NULL AND "teamId" = connection.parameters() ->> 'selectedTeamId'"#,
-            &["workspaceId".to_owned()],
-            Some(&token),
-            &request_parameters,
-            &std::collections::BTreeMap::new(),
+    let context = ResolvedParameterContext::from_request(Some(&token), &request_parameters);
+    let key_values = lookup
+        .key_bindings
+        .iter()
+        .map(|(_, binding)| {
+            context
+                .binding_value(binding, &std::collections::BTreeMap::new())
+                .expect("lookup key binding should resolve")
+        })
+        .collect::<Vec<_>>();
+    let ingest_dir = TempDir::new().expect("ingest temp directory");
+    let store = ReplicationMdbxStore::shared(ingest_dir.path()).expect("ingest store");
+    store
+        .persist_initial_snapshot_lookup_rows(
+            "Membership",
+            membership_rows(),
+            PostgresLsn(1),
+            &plan,
         )
-        .await
-        .expect("parameter query rows");
+        .expect("persist lookup rows");
+    let rows = store
+        .read_parameter_lookup_rows(&lookup.lookup_id, &key_values, 10)
+        .expect("read parameter lookup rows");
     let workspace_ids = rows
         .iter()
         .filter_map(|row| row.get("workspaceId").cloned())
@@ -452,52 +433,15 @@ async fn resolves_fixture_style_parameter_query_rows_from_postgres() {
         workspace_ids,
         std::collections::BTreeSet::from(["ws-1".to_owned(), "ws-2".to_owned()])
     );
-
-    context.finish().await;
 }
 
 #[tokio::test]
-#[ignore = "requires a live PostgreSQL; run via cargo test --test replication_smoke -- --ignored"]
 async fn sync_stream_subscription_resolves_fixture_parameter_query_buckets_over_http() {
-    let _guard = live_test_guard().await;
-    let context = LiveReplicationContext::new("rust_stream_params", Some("\"Membership\"")).await;
-    recreate_membership_table(&context.client).await;
-    context
-        .client
-        .execute(
-            r#"
-            INSERT INTO "Membership" ("userId", "teamId", "workspaceId")
-            VALUES
-              ($1, $2, $3),
-              ($1, $2, $4),
-              ($5, $2, $6)
-            "#,
-            &[
-                &"user-1",
-                &"team-1",
-                &"ws-1",
-                &"ws-2",
-                &"other-user",
-                &"ws-3",
-            ],
-        )
-        .await
-        .expect("insert scope rows");
-
     let state_dir = TempDir::new().expect("state temp directory should exist");
     let snapshot_dir = TempDir::new().expect("snapshot temp directory should exist");
     let tail_dir = TempDir::new().expect("tail temp directory should exist");
     let ingest_dir = TempDir::new().expect("ingest temp directory should exist");
-    let sync_rules = r#"
-config:
-  edition: 3
-streams:
-  web_workspaces:
-    with:
-      web_workspace_scope: SELECT "workspaceId" AS "workspaceId" FROM "Membership" WHERE connection.parameters() ->> 'schema_version' = 'web' AND "userId" = auth.user_id() AND "workspaceId" IS NOT NULL AND "teamId" = connection.parameters() ->> 'selectedTeamId'
-    queries:
-      - 'SELECT "Workspace".* FROM "Workspace", web_workspace_scope AS bucket WHERE "Workspace"."id" = bucket."workspaceId"'
-"#;
+    let sync_rules = parameter_sync_rules();
     unsafe {
         env::set_var("POWERSYNC_RUST_SYNC_RULES", sync_rules);
     }
@@ -512,11 +456,7 @@ streams:
             )
             .expect("valid auth policy"),
         ),
-        vec![SourceConnection {
-            id: "postgresql".to_owned(),
-            tag: "postgres".to_owned(),
-            uri: live_test_uri(),
-        }],
+        vec![],
     )
     .expect("service context");
     unsafe {
@@ -524,6 +464,14 @@ streams:
     }
 
     let ingest_store = ReplicationMdbxStore::shared(ingest_dir.path()).expect("ingest store");
+    ingest_store
+        .persist_initial_snapshot_lookup_rows(
+            "Membership",
+            membership_rows(),
+            PostgresLsn(1),
+            service_context.active_plan().as_ref(),
+        )
+        .expect("persist lookup rows");
     ingest_store
         .persist_initial_snapshot_marker_with_plan(
             PostgresLsn(0),
@@ -581,8 +529,42 @@ streams:
     assert!(body_text.contains(r#"1#web_workspaces|0[\"ws-1\"]"#));
     assert!(body_text.contains(r#"1#web_workspaces|0[\"ws-2\"]"#));
     assert!(!body_text.contains("ws-3"));
+}
 
-    context.finish().await;
+fn parameter_sync_rules() -> &'static str {
+    r#"
+config:
+  edition: 3
+streams:
+  web_workspaces:
+    with:
+      web_workspace_scope: SELECT "workspaceId" AS "workspaceId" FROM "Membership" WHERE connection.parameters() ->> 'schema_version' = 'web' AND "userId" = auth.user_id() AND "workspaceId" IS NOT NULL AND "teamId" = connection.parameters() ->> 'selectedTeamId'
+    queries:
+      - 'SELECT "Workspace".* FROM "Workspace", web_workspace_scope AS bucket WHERE "Workspace"."id" = bucket."workspaceId"'
+"#
+}
+
+fn membership_rows() -> Vec<RowData> {
+    vec![
+        RowData::from_pairs(vec![
+            ("id", ColumnValue::text("membership-1")),
+            ("userId", ColumnValue::text("user-1")),
+            ("teamId", ColumnValue::text("team-1")),
+            ("workspaceId", ColumnValue::text("ws-1")),
+        ]),
+        RowData::from_pairs(vec![
+            ("id", ColumnValue::text("membership-2")),
+            ("userId", ColumnValue::text("user-1")),
+            ("teamId", ColumnValue::text("team-1")),
+            ("workspaceId", ColumnValue::text("ws-2")),
+        ]),
+        RowData::from_pairs(vec![
+            ("id", ColumnValue::text("membership-3")),
+            ("userId", ColumnValue::text("other-user")),
+            ("teamId", ColumnValue::text("team-1")),
+            ("workspaceId", ColumnValue::text("ws-3")),
+        ]),
+    ]
 }
 
 fn signed_hs256_token(secret: &[u8], payload: serde_json::Value) -> String {
@@ -792,22 +774,6 @@ async fn recreate_tasks_table(client: &Client) {
         )
         .await
         .expect("recreate tasks table");
-}
-
-async fn recreate_membership_table(client: &Client) {
-    client
-        .batch_execute(
-            r#"
-            DROP TABLE IF EXISTS "Membership";
-            CREATE TABLE "Membership" (
-                "userId" text NOT NULL,
-                "teamId" text NOT NULL,
-                "workspaceId" text
-            );
-            "#,
-        )
-        .await
-        .expect("recreate Membership table");
 }
 
 async fn insert_task(client: &Client, task_id: &str, title: &str, summary: &str) {

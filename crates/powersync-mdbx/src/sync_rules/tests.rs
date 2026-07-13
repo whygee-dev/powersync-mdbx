@@ -5,6 +5,7 @@ use pg_walstream::{ColumnValue, RowData};
 use super::catalog::{
     SUPPORTED_COMPATIBILITY_VERSION, SUPPORTED_EDITION, SUPPORTED_STORAGE_VERSION,
 };
+use super::model::Predicate;
 use super::*;
 
 fn arbitrary_subset_plan() -> RustExecutionPlan {
@@ -166,9 +167,163 @@ streams:
     assert_eq!(parameter.source_column, "project_id");
     assert!(matches!(
         &parameter.binding,
-        CanonicalBinding::ParameterQueryColumn { name, query }
-            if name == "project_id" && query.contains("auth.user_id()")
+        CanonicalBinding::ParameterQueryColumn { name, lookup }
+            if name == "project_id" && lookup.raw_query.contains("auth.user_id()")
     ));
+}
+
+#[test]
+fn parameter_lookup_plan_parses_v1_forms() {
+    let plan = parse_parameter_lookup_plan(
+        r#"SELECT "workspaceId" AS "workspaceAlias", "other""x" AS "alias""x" FROM "Membership" WHERE "teamId" = connection.parameters() ->> 'teamId' AND auth.user_id() = "userId" AND "workspaceId" IS NOT NULL AND "kind" = 'shared'"#,
+    )
+    .expect("v1 lookup query should parse");
+    assert_eq!(plan.source_table, "Membership");
+    assert_eq!(
+        plan.selected,
+        vec![
+            ParameterLookupSelectedColumn {
+                alias: "workspaceAlias".to_owned(),
+                column: "workspaceId".to_owned(),
+            },
+            ParameterLookupSelectedColumn {
+                alias: "alias\"x".to_owned(),
+                column: "other\"x".to_owned(),
+            },
+        ]
+    );
+    assert_eq!(
+        plan.key_bindings
+            .iter()
+            .map(|(column, _)| column.as_str())
+            .collect::<Vec<_>>(),
+        vec!["teamId", "userId"]
+    );
+    assert!(matches!(plan.row_predicate, Some(Predicate::And { .. })));
+}
+
+#[test]
+fn parameter_lookup_plan_accepts_reversed_key_and_literal_predicates() {
+    let auth = parse_parameter_lookup_plan(
+        r#"SELECT user_id FROM Membership WHERE auth.user_id() = "userId""#,
+    )
+    .expect("reversed binding should parse");
+    assert_eq!(auth.key_bindings[0].0, "userId");
+
+    let literal = parse_parameter_lookup_plan(
+        "SELECT kind FROM Membership WHERE kind = 'shared' AND id = auth.parameter('id')",
+    )
+    .expect("string row predicate should parse");
+    assert!(matches!(literal.row_predicate, Some(Predicate::Eq { .. })));
+}
+
+#[test]
+fn parameter_lookup_plan_rejects_unsupported_forms() {
+    for (query, expected) in [
+        (
+            "SELECT id FROM Membership WHERE id = auth.user_id() OR id = auth.parameter('id')",
+            "OR",
+        ),
+        (
+            "SELECT id FROM Membership WHERE id IN auth.user_id()",
+            "IN",
+        ),
+        (
+            "SELECT id FROM Membership, json_each(request.parameters() ->> 'ids') WHERE id = auth.user_id()",
+            "json_each",
+        ),
+        (
+            "SELECT id FROM Membership JOIN Users ON Users.id = Membership.user_id WHERE id = auth.user_id()",
+            "joins",
+        ),
+        (
+            "SELECT id FROM (SELECT id FROM Membership) WHERE id = auth.user_id()",
+            "sub-selects",
+        ),
+        (
+            "SELECT id FROM Membership WHERE id > auth.user_id()",
+            "non-equality",
+        ),
+        (
+            "SELECT id FROM Membership WHERE id = auth.user_id() AND id = auth.parameter('id')",
+            "duplicate binding column",
+        ),
+        ("SELECT id WHERE id = auth.user_id()", "missing FROM"),
+        ("SELECT FROM Membership WHERE id = auth.user_id()", "empty"),
+        (
+            "SELECT id FROM Membership WHERE auth.user_id() = auth.parameter('id')",
+            "binding = binding",
+        ),
+        (
+            "SELECT id FROM Membership WHERE id = connection.parameter('id')",
+            "unsupported binding",
+        ),
+        (
+            "SELECT id FROM analytics.Membership WHERE id = auth.user_id()",
+            "public schema",
+        ),
+    ] {
+        let error = parse_parameter_lookup_plan(query)
+            .expect_err("unsupported lookup query should fail closed")
+            .to_string();
+        assert!(
+            error.to_ascii_lowercase().contains(&expected.to_ascii_lowercase()),
+            "error `{error}` should mention `{expected}`"
+        );
+    }
+}
+
+#[test]
+fn unsupported_parameter_lookup_query_fails_the_full_compile() {
+    let source = r#"config:
+  edition: 3
+with:
+  scope: SELECT id FROM Membership WHERE user_id = auth.user_id() OR org_id = auth.parameter('org_id')
+streams:
+  first:
+    query: SELECT * FROM Workspaces, scope AS bucket WHERE Workspaces.id = bucket.id
+"#;
+    let error = match compile_sync_rules_source(source) {
+        Err(error) => error.to_string(),
+        Ok(canonical) => lower_canonical_semantic_plan(canonical)
+            .expect_err("unsupported lookup query must not lower")
+            .to_string(),
+    };
+    assert!(
+        error.contains("OR is not supported in parameter lookup queries"),
+        "error `{error}` should carry the grammar rejection"
+    );
+}
+
+#[test]
+fn parameter_lookup_ids_are_stable_and_lowering_deduplicates() {
+    let query = "SELECT id FROM Membership WHERE user_id = auth.user_id()";
+    let first = parse_parameter_lookup_plan(query).expect("lookup query");
+    let second = parse_parameter_lookup_plan(query).expect("lookup query");
+    let different = parse_parameter_lookup_plan(
+        "SELECT id FROM Membership WHERE user_id = auth.parameter('user_id')",
+    )
+    .expect("lookup query");
+    assert_eq!(first.lookup_id, second.lookup_id);
+    assert_ne!(first.lookup_id, different.lookup_id);
+
+    let canonical = compile_sync_rules_source(
+        r#"config:
+  edition: 3
+with:
+  scope: SELECT id FROM Membership WHERE user_id = auth.user_id()
+streams:
+  first:
+    query: SELECT * FROM Workspaces, scope AS bucket WHERE Workspaces.id = bucket.id
+  second:
+    query: SELECT * FROM Projects, scope AS bucket WHERE Projects.id = bucket.id
+"#,
+    )
+    .expect("duplicate lookup source should compile");
+    let plan = lower_canonical_semantic_plan(canonical).expect("execution plan");
+    let tables = plan.lookup_source_tables();
+    assert_eq!(tables.len(), 1);
+    assert_eq!(tables[0].lookups.len(), 1);
 }
 
 #[test]

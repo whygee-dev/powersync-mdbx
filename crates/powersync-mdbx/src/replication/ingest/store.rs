@@ -32,7 +32,10 @@ use super::{
         scan_current_route_index_keys, CurrentDocumentWrite, CurrentWriteContext,
         PersistedBucketedDocument,
     },
-    derive::{derive_sync_tail_ops_with_options, sync_rule_error_to_ingest_error},
+    derive::{
+        derive_parameter_lookup_ops, derive_sync_tail_ops_with_options,
+        sync_rule_error_to_ingest_error,
+    },
     error::ReplicationIngestError,
     keys::{
         batch_key, current_doc_prefix, current_route_index_prefix, sync_tail_op_key,
@@ -41,6 +44,9 @@ use super::{
         META_LAST_COMMIT_END_LSN_KEY, META_LAYOUT_VERSION_KEY,
         META_SYNC_TAIL_INDEXED_THROUGH_OP_ID_KEY, META_SYNC_TAIL_LAST_OP_ID_KEY,
         META_SYNC_TAIL_RETAINED_FLOOR_KEY,
+    },
+    lookup_state::{
+        apply_parameter_lookup_ops, put_parameter_lookup_row, scan_parameter_lookup_entries,
     },
     metrics::{ReplicationIngestMetricCounters, ReplicationIngestMetrics},
     tail_log::{
@@ -65,7 +71,7 @@ const MDBX_MAX_SIZE_ENV: &str = "POWERSYNC_RUST_MDBX_MAX_SIZE_BYTES";
 const INGEST_PATH_ENV: &str = "POWERSYNC_RUST_MDBX_INGEST_PATH";
 const TAIL_PATH_ENV: &str = "POWERSYNC_RUST_MDBX_TAIL_PATH";
 const MDBX_PATH_ENV: &str = "POWERSYNC_RUST_MDBX_PATH";
-const INGEST_LAYOUT_FORMAT_VERSION: &str = "global-op-index-retention-v2";
+const INGEST_LAYOUT_FORMAT_VERSION: &str = "global-op-index-retention-v3";
 const DEFAULT_TAIL_RETAIN_OPS: u64 = 1_000_000;
 const DEFAULT_TAIL_PRUNE_BATCH_OPS: u64 = 10_000;
 const CURSOR_IDS_PER_MILLISECOND: u64 = 1 << 20;
@@ -285,6 +291,7 @@ impl ReplicationMdbxStore {
         let sync_rule_eval_started = Instant::now();
         let derived_sync_ops =
             derive_sync_tail_ops_with_options(batch, plan, options.assume_new_inserts)?;
+        let derived_lookup_ops = derive_parameter_lookup_ops(batch, plan)?;
         let write_started = Instant::now();
         let txn = self
             .db
@@ -332,6 +339,7 @@ impl ReplicationMdbxStore {
         .map_err(|error| {
             ReplicationIngestError::Mdbx(format!("persist last commit LSN: {error}"))
         })?;
+        apply_parameter_lookup_ops(&txn, &table, &derived_lookup_ops, plan)?;
         if options.snapshot_without_tail {
             persist_snapshot_current_ops_without_tail(
                 &txn,
@@ -435,6 +443,7 @@ impl ReplicationMdbxStore {
                     "initial snapshot source table {source_table} is not present in sync plan"
                 ))
             })?;
+        let lookup_table = plan.lookup_table_plan(source_table);
         let row_count = rows.len();
         let write_started = Instant::now();
         let txn = self
@@ -459,6 +468,9 @@ impl ReplicationMdbxStore {
             HashMap::<(String, BTreeMap<String, String>), Vec<CurrentAccumulatorTarget>>::new();
         let object_type = table_plan.object_type();
         for row in rows {
+            if let Some(lookup_table) = lookup_table {
+                put_parameter_lookup_row(&txn, &table, lookup_table, &row)?;
+            }
             let object_id = table_plan
                 .object_id_for_row(&row)
                 .map_err(sync_rule_error_to_ingest_error)?;
@@ -538,6 +550,57 @@ impl ReplicationMdbxStore {
             let _ = self.task_tail_advance_tx.send(last_op_id);
         }
 
+        Ok(())
+    }
+
+    pub fn persist_initial_snapshot_lookup_rows(
+        &self,
+        source_table: &str,
+        rows: Vec<RowData>,
+        end_lsn: PostgresLsn,
+        plan: &RustExecutionPlan,
+    ) -> Result<(), ReplicationIngestError> {
+        self.ensure_layout_version_for(plan.storage_contract_id())?;
+        let lookup_table = plan.lookup_table_plan(source_table).ok_or_else(|| {
+            ReplicationIngestError::CorruptBatch(format!(
+                "initial snapshot lookup source table {source_table} is not present in sync plan"
+            ))
+        })?;
+        let write_started = Instant::now();
+        let txn = self
+            .db
+            .begin_rw_txn()
+            .map_err(|error| ReplicationIngestError::Mdbx(format!("begin RW txn: {error}")))?;
+        let table = txn.open_table(None).map_err(|error| {
+            ReplicationIngestError::Mdbx(format!("open default table: {error}"))
+        })?;
+        txn.put(
+            &table,
+            META_LAST_COMMIT_END_LSN_KEY,
+            end_lsn.to_string(),
+            WriteFlags::UPSERT,
+        )
+        .map_err(|error| {
+            ReplicationIngestError::Mdbx(format!("persist last commit LSN: {error}"))
+        })?;
+        for row in &rows {
+            put_parameter_lookup_row(&txn, &table, lookup_table, row)?;
+        }
+        txn.commit().map_err(|error| {
+            ReplicationIngestError::Mdbx(format!(
+                "commit initial snapshot lookup batch txn: {error}"
+            ))
+        })?;
+        self.metrics
+            .rows_seen
+            .fetch_add(rows.len() as u64, Ordering::Relaxed);
+        self.metrics.mdbx_write_txn_ms.fetch_add(
+            write_started.elapsed().as_millis() as u64,
+            Ordering::Relaxed,
+        );
+        self.metrics
+            .batches_persisted
+            .fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
 
@@ -783,6 +846,22 @@ impl ReplicationMdbxStore {
             .as_deref()
             .map(ReplicationCommitBatch::decode)
             .transpose()
+    }
+
+    pub fn read_parameter_lookup_rows(
+        &self,
+        lookup_id: &str,
+        key_values: &[String],
+        max_entries: usize,
+    ) -> Result<Vec<BTreeMap<String, String>>, ReplicationIngestError> {
+        let txn = self
+            .db
+            .begin_ro_txn()
+            .map_err(|error| ReplicationIngestError::Mdbx(format!("begin RO txn: {error}")))?;
+        let table = txn.open_table(None).map_err(|error| {
+            ReplicationIngestError::Mdbx(format!("open default table: {error}"))
+        })?;
+        scan_parameter_lookup_entries(&txn, &table, lookup_id, key_values, max_entries)
     }
 
     #[cfg(test)]

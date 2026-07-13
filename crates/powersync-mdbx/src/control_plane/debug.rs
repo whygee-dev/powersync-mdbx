@@ -284,8 +284,8 @@ fn binding_json(binding: &CanonicalBinding) -> Value {
         CanonicalBinding::RequestParameterArray { name } => {
             json!({"type": "request_parameter_array", "name": name})
         }
-        CanonicalBinding::ParameterQueryColumn { name, query } => {
-            json!({"type": "parameter_query_column", "name": name, "query": query})
+        CanonicalBinding::ParameterQueryColumn { name, lookup } => {
+            json!({"type": "parameter_query_column", "name": name, "query": lookup.raw_query})
         }
         CanonicalBinding::BucketParameter { name } => {
             json!({"type": "bucket_parameter", "name": name})

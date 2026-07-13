@@ -29,7 +29,10 @@ use crate::{
     http::{AdmissionStartedAt, AppState},
     protocol::messages::{SyncChunk, SyncChunkKind},
     storage::{StreamEncoding, SyncBodySource, SyncBucketCursors, SyncChunkSource},
-    sync_rules::{bucket_name_for_stream_group_values, request_filter_matches, RustExecutionPlan},
+    sync_rules::{
+        bucket_name_for_stream_group_values, request_filter_matches, ParameterLookupPlan,
+        RustExecutionPlan,
+    },
 };
 
 const NDJSON_CONTENT_TYPE: &str = "application/x-ndjson";
@@ -92,7 +95,7 @@ pub async fn sync_stream(
     );
     let active_plan = state.service_context().active_plan();
     let bucket_cursors = match request
-        .bucket_cursors(state.service_context(), token.as_ref())
+        .bucket_cursors(state.service_context(), state.storage(), token.as_ref())
         .await
     {
         Ok(bucket_cursors) => bucket_cursors,
@@ -813,6 +816,7 @@ impl SyncStreamRequest {
     async fn bucket_cursors(
         &self,
         service_context: &ServiceContext,
+        storage: &crate::SharedStorage,
         token: Option<&TokenPayload>,
     ) -> Result<SyncBucketCursors, String> {
         let existing = self
@@ -834,7 +838,7 @@ impl SyncStreamRequest {
         if let Some(streams) = &self.streams {
             let existing_map = existing.iter().cloned().collect::<BTreeMap<_, _>>();
             let desired_buckets = self
-                .resolve_stream_bucket_names(service_context, token, streams)
+                .resolve_stream_bucket_names(service_context, storage, token, streams)
                 .await?;
             return Ok(SyncBucketCursors::from_pairs(
                 desired_buckets
@@ -933,6 +937,7 @@ impl SyncStreamRequest {
     async fn resolve_stream_bucket_names(
         &self,
         service_context: &ServiceContext,
+        storage: &crate::SharedStorage,
         token: Option<&TokenPayload>,
         streams: &StreamSubscriptionRequest,
     ) -> Result<Vec<String>, String> {
@@ -964,15 +969,15 @@ impl SyncStreamRequest {
                 }) {
                     continue;
                 }
-                if let Some(query) =
+                if let Some(lookup) =
                     group
                         .bucket_parameters
                         .iter()
                         .find_map(|parameter| match &parameter.binding {
                             crate::sync_rules::CanonicalBinding::ParameterQueryColumn {
-                                query,
+                                lookup,
                                 ..
-                            } => Some(query.clone()),
+                            } => Some(lookup.as_ref()),
                             _ => None,
                         })
                 {
@@ -981,26 +986,24 @@ impl SyncStreamRequest {
                         .iter()
                         .map(|parameter| parameter.name.clone())
                         .collect::<Vec<_>>();
-                    let rows = service_context
-                        .parameter_query_rows(
-                            &query,
-                            &columns,
-                            token,
-                            &self.parameters,
-                            &subscription_parameters,
+                    let rows = resolve_parameter_lookup_rows(
+                        storage,
+                        lookup,
+                        &context,
+                        &subscription_parameters,
+                        max_resolved_buckets_per_request(),
+                    )
+                    .map_err(|error| {
+                        error!(
+                            stream = %subscription.stream,
+                            reason = %error,
+                            "parameter query evaluation failed"
+                        );
+                        format!(
+                            "parameter query for stream {} could not be evaluated",
+                            subscription.stream
                         )
-                        .await
-                        .map_err(|error| {
-                            error!(
-                                stream = %subscription.stream,
-                                reason = %error,
-                                "parameter query evaluation failed"
-                            );
-                            format!(
-                                "parameter query for stream {} could not be evaluated",
-                                subscription.stream
-                            )
-                        })?;
+                    })?;
                     for row in rows {
                         let values = columns
                             .iter()
@@ -1076,6 +1079,27 @@ impl SyncStreamRequest {
     }
 }
 
+fn resolve_parameter_lookup_rows(
+    storage: &crate::SharedStorage,
+    lookup: &ParameterLookupPlan,
+    context: &ResolvedParameterContext,
+    subscription_parameters: &BTreeMap<String, String>,
+    max_entries: usize,
+) -> Result<Vec<BTreeMap<String, String>>, String> {
+    let key_values = lookup
+        .key_bindings
+        .iter()
+        .map(|(column, binding)| {
+            context
+                .binding_value(binding, subscription_parameters)
+                .ok_or_else(|| format!("missing value for parameter query key {column}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    storage
+        .read_parameter_lookup_rows(&lookup.lookup_id, &key_values, max_entries)
+        .map_err(|error| error.to_string())
+}
+
 fn max_resolved_buckets_per_request() -> usize {
     const DEFAULT_MAX_RESOLVED_BUCKETS: usize = 10_000;
     std::env::var("POWERSYNC_RUST_MAX_BUCKETS_PER_REQUEST")
@@ -1143,6 +1167,12 @@ mod tests {
         storage::{Storage, StorageError, SyncBodySource, SyncBucketCursors, SyncChunkSource},
         sync_rules::DEFAULT_TASKS_BUCKET_NAME,
     };
+
+    fn test_storage() -> crate::SharedStorage {
+        Arc::new(TestStorage {
+            counters: Arc::new(TestStorageCounters::default()),
+        })
+    }
 
     #[test]
     fn negotiate_content_type_defaults_to_bson_when_binary_flag_is_set_and_accept_missing() {
@@ -1212,7 +1242,7 @@ mod tests {
 
         assert_eq!(
             request
-                .bucket_cursors(&test_service_context(), None)
+                .bucket_cursors(&test_service_context(), &test_storage(), None)
                 .await
                 .expect_err("unauthorized bucket should fail closed"),
             "explicit bucket unknown is not an authorized default bucket; use stream subscriptions for parameterized buckets"
@@ -1222,7 +1252,7 @@ mod tests {
     #[tokio::test]
     async fn empty_default_request_resolves_authorized_default_buckets() {
         let cursors = SyncStreamRequest::default()
-            .bucket_cursors(&test_service_context(), None)
+            .bucket_cursors(&test_service_context(), &test_storage(), None)
             .await
             .expect("default request should resolve");
 
@@ -1247,7 +1277,7 @@ mod tests {
         };
 
         assert!(request
-            .bucket_cursors(&test_service_context(), Some(&token))
+            .bucket_cursors(&test_service_context(), &test_storage(), Some(&token))
             .await
             .expect_err("direct parameterized bucket must fail closed")
             .contains("is not an authorized default bucket"));
@@ -1264,7 +1294,7 @@ mod tests {
         };
 
         let cursors = request
-            .bucket_cursors(&test_service_context(), None)
+            .bucket_cursors(&test_service_context(), &test_storage(), None)
             .await
             .expect("empty stream subscription should resolve to no buckets");
 
@@ -1313,7 +1343,7 @@ mod tests {
 
         assert_eq!(
             request
-                .bucket_cursors(&test_service_context(), Some(&token))
+                .bucket_cursors(&test_service_context(), &test_storage(), Some(&token))
                 .await
                 .expect("stream buckets should resolve"),
             SyncBucketCursors::from_pairs([
@@ -1350,7 +1380,7 @@ mod tests {
 
         assert_eq!(
             request
-                .bucket_cursors(&test_service_context(), Some(&token))
+                .bucket_cursors(&test_service_context(), &test_storage(), Some(&token))
                 .await
                 .expect_err("client parameters must not satisfy auth.parameter"),
             "missing value for stream tasks_by_project parameter project_id"

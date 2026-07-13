@@ -1,7 +1,7 @@
 mod sync_edge;
 mod wire_mdbx;
 
-use std::{env, future::Future, pin::Pin, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, env, future::Future, pin::Pin, sync::Arc, time::Duration};
 
 use bytes::Bytes;
 
@@ -140,6 +140,17 @@ pub trait Storage: Send + Sync {
         plan: &RustExecutionPlan,
         encoding: StreamEncoding,
     ) -> Result<SyncChunkSource, StorageError>;
+
+    fn read_parameter_lookup_rows(
+        &self,
+        _lookup_id: &str,
+        _key_values: &[String],
+        _max_entries: usize,
+    ) -> Result<Vec<BTreeMap<String, String>>, StorageError> {
+        Err(StorageError(
+            "parameter lookup reads are not supported by this storage backend".to_owned(),
+        ))
+    }
 
     fn sync_body_source_for_buckets_with_plan(
         &self,
