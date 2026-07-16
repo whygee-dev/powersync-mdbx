@@ -101,7 +101,9 @@ const apiToken = process.env.POWERSYNC_USER_VALUE_API_TOKEN ?? `user-value-api-t
 const officialImage =
   process.env.POWERSYNC_OFFICIAL_IMAGE ??
   'journeyapps/powersync-service@sha256:b6b22fa7d0d862f04bdff62846e656756d17bcf3dd6eca399a0633671051438b';
-const mongoImage = process.env.POWERSYNC_USER_VALUE_MONGO_IMAGE ?? 'mongo:7';
+const mongoImage =
+  process.env.POWERSYNC_USER_VALUE_MONGO_IMAGE ??
+  'mongo@sha256:d5b3ca8c3f3cdce78d44870dc0871b76d5235e9b2ad4ea6bea5d1fbff8027703';
 const socatImage = process.env.POWERSYNC_USER_VALUE_SOCAT_IMAGE ?? 'alpine/socat';
 const postgresImage = process.env.POWERSYNC_USER_VALUE_POSTGRES_IMAGE ?? 'postgres:16';
 const rustImage = process.env.POWERSYNC_USER_VALUE_RUST_IMAGE ?? 'powersync-mdbx:benchmark';
@@ -1632,7 +1634,6 @@ FROM pg_replication_slots
 WHERE active = FALSE
   AND slot_name LIKE '${escapeLiteral(officialSlotPrefix)}%';
 `.trim());
-    fs.rmSync(path.join(benchmarkDir, 'rust-sync-edge'), { recursive: true, force: true });
     fs.rmSync(path.join(benchmarkDir, 'rust-wire-mdbx'), { recursive: true, force: true });
     fs.rmSync(path.join(benchmarkDir, 'rust-wire-mdbx-tail'), { recursive: true, force: true });
     fs.rmSync(path.join(benchmarkDir, 'rust-sync-rules-state.json'), { force: true });
@@ -2232,9 +2233,6 @@ async function startRustService(syncRulesYaml) {
   const env = {
     ...process.env,
     POWERSYNC_RUST_PORT: `${rustPort}`,
-    POWERSYNC_RUST_STORAGE_BACKEND: process.env.POWERSYNC_RUST_STORAGE_BACKEND ?? 'wire-mdbx',
-    POWERSYNC_RUST_SYNC_EDGE_PATH:
-      process.env.POWERSYNC_RUST_SYNC_EDGE_PATH ?? path.join(benchmarkDir, 'rust-sync-edge'),
     POWERSYNC_RUST_MDBX_PATH:
       process.env.POWERSYNC_RUST_MDBX_PATH ?? path.join(benchmarkDir, 'rust-wire-mdbx'),
     POWERSYNC_RUST_MDBX_TAIL_PATH:
@@ -2301,7 +2299,6 @@ async function startRustContainer(syncRulesYaml) {
   rustLogPath = path.join(benchmarkDir, `rust-service-${Date.now()}.log`);
   const env = rustServiceEnvironment(syncRulesYaml, {
     port: 8080,
-    syncEdgePath: '/benchmark-data/sync-edge',
     mdbxPath: '/benchmark-data/wire-mdbx',
     mdbxTailPath: '/benchmark-data/wire-mdbx-tail',
     syncRulesStatePath: '/benchmark-data/sync-rules-state.json',
@@ -2336,8 +2333,6 @@ function rustServiceEnvironment(syncRulesYaml, paths) {
   const env = {
     ...rustPassthroughEnvironment(),
     POWERSYNC_RUST_PORT: `${paths.port}`,
-    POWERSYNC_RUST_STORAGE_BACKEND: 'wire-mdbx',
-    POWERSYNC_RUST_SYNC_EDGE_PATH: paths.syncEdgePath,
     POWERSYNC_RUST_MDBX_PATH: paths.mdbxPath,
     POWERSYNC_RUST_MDBX_TAIL_PATH: paths.mdbxTailPath,
     POWERSYNC_RUST_SYNC_RULES: syncRulesYaml,

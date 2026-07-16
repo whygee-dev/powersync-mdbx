@@ -477,7 +477,9 @@ pub fn parse_parameter_lookup_plan(raw: &str) -> Result<ParameterLookupPlan, Syn
             )));
         }
 
-        let comparison = predicate.replace("->>", "");
+        // Mask literal contents first so a value like 'a>b' cannot trip the
+        // operator scan.
+        let comparison = mask_string_literals(predicate).replace("->>", "");
         if comparison.contains('>') || comparison.contains('<') || comparison.contains("!=") {
             return Err(SyncRuleError(format!(
                 "non-equality comparison is not supported in parameter lookup queries: {predicate}"
@@ -515,21 +517,11 @@ pub fn parse_parameter_lookup_plan(raw: &str) -> Result<ParameterLookupPlan, Syn
                 )))
             }
             (Some(binding), None) | (None, Some(binding)) => {
-                let binding_expression = if parse_binding(left).is_some() {
-                    left
-                } else {
-                    right
-                };
                 let other = if parse_binding(left).is_some() {
                     right
                 } else {
                     left
                 };
-                if !is_lookup_binding_expression(binding_expression) {
-                    return Err(SyncRuleError(format!(
-                        "unsupported binding in parameter lookup query: {predicate}"
-                    )));
-                }
                 if sql_literal_to_json(other).is_some() {
                     if !is_lookup_request_binding(&binding) {
                         return Err(SyncRuleError(format!(
@@ -636,7 +628,34 @@ fn lookup_column_name(value: &str, predicate: &str) -> Result<String, SyncRuleEr
     Ok(column)
 }
 
+/// Drop the contents of single-quoted SQL string literals (honoring `''`
+/// escapes) so character scans cannot false-positive on literal contents.
+fn mask_string_literals(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    let mut characters = value.chars().peekable();
+    while let Some(character) = characters.next() {
+        output.push(character);
+        if character != '\'' {
+            continue;
+        }
+        while let Some(inner) = characters.next() {
+            if inner == '\'' {
+                if characters.peek() == Some(&'\'') {
+                    characters.next();
+                    continue;
+                }
+                output.push('\'');
+                break;
+            }
+        }
+    }
+    output
+}
+
 fn is_lookup_identifier(value: &str) -> bool {
+    // Values arrive normalized (outer quotes stripped), so embedded quote and
+    // whitespace characters are what remains of a quoted PostgreSQL
+    // identifier; both stay legal here.
     !value.is_empty()
         && value.split('.').all(|part| {
             !part.is_empty()
@@ -657,21 +676,6 @@ fn is_lookup_key_binding(binding: &CanonicalBinding) -> bool {
             | CanonicalBinding::RequestUserId
             | CanonicalBinding::RequestParameter { .. }
     )
-}
-
-fn is_lookup_binding_expression(value: &str) -> bool {
-    let value = value.trim();
-    value.eq_ignore_ascii_case("auth.user_id()")
-        || value.to_ascii_lowercase().starts_with("auth.parameter(")
-        || value
-            .to_ascii_lowercase()
-            .starts_with("subscription.parameter(")
-        || value
-            .to_ascii_lowercase()
-            .starts_with("request.parameters() ->> ")
-        || value
-            .to_ascii_lowercase()
-            .starts_with("connection.parameters() ->> ")
 }
 
 fn is_lookup_request_binding(binding: &CanonicalBinding) -> bool {
@@ -715,6 +719,11 @@ struct LookupIdInput<'a> {
     row_predicate: &'a Option<Predicate>,
 }
 
+/// Identity is deliberately conservative: the raw query text is hashed
+/// alongside the structured fields, so two spellings of the same plan get
+/// distinct ids and materialize separately. The id feeds MDBX key prefixes
+/// and therefore the storage contract; changing how it is derived is a
+/// layout-version bump.
 fn lookup_id(
     raw_query: &str,
     source_table: &str,

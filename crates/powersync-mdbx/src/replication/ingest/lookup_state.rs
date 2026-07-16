@@ -187,7 +187,11 @@ fn row_id(source_table: &str, row: &RowData) -> Result<String, ReplicationIngest
 }
 
 fn column_value_to_string(value: &ColumnValue) -> Option<String> {
-    (!value.is_null()).then(|| value.to_string())
+    // `as_str` is `None` for Binary and non-UTF-8 payloads as well as SQL
+    // NULL; the bootstrap type guard restricts lookup columns to text-family
+    // types, so anything else is treated as null rather than lossily
+    // stringified.
+    value.as_str().map(str::to_owned)
 }
 
 fn read_parameter_lookup_row<K: TransactionKind>(
@@ -221,6 +225,9 @@ fn put_parameter_lookup_indexes(
         if !row_predicate_matches(lookup.row_predicate.as_ref(), document) {
             continue;
         }
+        // A null key or selected column produces no index entry: SQL equality
+        // never matches NULL, and a null bucket parameter cannot name a
+        // bucket.
         let Some(key_values) = lookup
             .key_bindings
             .iter()
@@ -413,6 +420,21 @@ mod tests {
         txn.commit().expect("commit");
     }
 
+    fn remove(
+        store: &crate::replication::ingest::store::ReplicationMdbxStore,
+        plan: &CompiledLookupTablePlan,
+        old_data: RowData,
+    ) {
+        let txn = store.db.begin_rw_txn().expect("rw txn");
+        let table = txn.open_table(None).expect("default table");
+        let operation = DerivedParameterLookupOp {
+            source_table: plan.source_table.clone(),
+            operation: ParameterLookupOperation::Remove { old_data },
+        };
+        apply_parameter_lookup_op(&txn, &table, plan, &operation).expect("remove lookup row");
+        txn.commit().expect("commit");
+    }
+
     #[test]
     fn parameter_lookup_rows_follow_key_and_predicate_transitions() {
         let directory = TempDir::new().expect("temp directory");
@@ -531,6 +553,68 @@ mod tests {
                 .read_parameter_lookup_rows(&plan.lookups[1].lookup_id, &key, 10)
                 .expect("read second lookup after explicit null"),
             vec![BTreeMap::from([("value".to_owned(), "second".to_owned())])]
+        );
+    }
+
+    #[test]
+    fn delete_removes_row_and_index_entries_from_pk_only_old_tuple() {
+        let directory = TempDir::new().expect("temp directory");
+        let store = crate::replication::ingest::store::ReplicationMdbxStore::new(directory.path())
+            .expect("store");
+        let plan = lookup_table();
+        put(
+            &store,
+            &plan,
+            &row("row:1", "team:1", "shared", "workspace:1", "first"),
+        );
+        let key = vec!["team:1".to_owned()];
+
+        // REPLICA IDENTITY DEFAULT deletes carry only the primary key; index
+        // removal must come from the stored document, not the old tuple.
+        let pk_only = RowData::from_pairs(vec![("id", ColumnValue::text("row:1"))]);
+        remove(&store, &plan, pk_only.clone());
+        assert!(store
+            .read_parameter_lookup_rows(&plan.lookups[0].lookup_id, &key, 10)
+            .expect("read after delete")
+            .is_empty());
+        assert!(store
+            .read_parameter_lookup_rows(&plan.lookups[1].lookup_id, &key, 10)
+            .expect("read second lookup after delete")
+            .is_empty());
+
+        // Deleting a row that was never materialized is a no-op, not an error.
+        remove(&store, &plan, pk_only);
+    }
+
+    #[test]
+    fn update_with_pk_change_removes_the_old_row() {
+        let directory = TempDir::new().expect("temp directory");
+        let store = crate::replication::ingest::store::ReplicationMdbxStore::new(directory.path())
+            .expect("store");
+        let plan = lookup_table();
+        put(
+            &store,
+            &plan,
+            &row("row:1", "team:1", "shared", "workspace:1", "first"),
+        );
+        let key = vec!["team:1".to_owned()];
+
+        // If the old row survived a PK change, this scan would return the
+        // entries of both row ids under the unchanged key.
+        update(
+            &store,
+            &plan,
+            row("row:1", "team:1", "shared", "workspace:1", "first"),
+            row("row:2", "team:1", "shared", "workspace:2", "second"),
+        );
+        assert_eq!(
+            store
+                .read_parameter_lookup_rows(&plan.lookups[0].lookup_id, &key, 10)
+                .expect("read after pk change"),
+            vec![BTreeMap::from([(
+                "workspace_id".to_owned(),
+                "workspace:2".to_owned()
+            )])]
         );
     }
 

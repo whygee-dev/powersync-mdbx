@@ -215,6 +215,52 @@ fn parameter_lookup_plan_accepts_reversed_key_and_literal_predicates() {
     )
     .expect("string row predicate should parse");
     assert!(matches!(literal.row_predicate, Some(Predicate::Eq { .. })));
+
+    let operator_chars_in_literal = parse_parameter_lookup_plan(
+        "SELECT kind FROM Membership WHERE kind = 'a>b' AND id = auth.parameter('id')",
+    )
+    .expect("operator characters inside a string literal should not read as a comparison");
+    assert!(matches!(
+        operator_chars_in_literal.row_predicate,
+        Some(Predicate::Eq { .. })
+    ));
+}
+
+#[test]
+fn parameter_lookup_plan_accepts_bindings_by_canonical_kind_not_spelling() {
+    let request_user_id = parse_parameter_lookup_plan(
+        "SELECT workspace_id FROM Membership WHERE user_id = request.user_id()",
+    )
+    .expect("request.user_id() should parse like auth.user_id()");
+    assert!(matches!(
+        request_user_id.key_bindings[0].1,
+        CanonicalBinding::RequestUserId
+    ));
+
+    let call_form = parse_parameter_lookup_plan(
+        "SELECT workspace_id FROM Membership WHERE id = connection.parameter('id')",
+    )
+    .expect("connection.parameter(...) should parse like connection.parameters() ->> ...");
+    assert!(matches!(
+        call_form.key_bindings[0].1,
+        CanonicalBinding::RequestParameter { .. }
+    ));
+
+    let unspaced_arrow = parse_parameter_lookup_plan(
+        "SELECT workspace_id FROM Membership WHERE kind = request.parameters()->>'kind'",
+    )
+    .expect("->> without surrounding spaces should parse");
+    assert!(matches!(
+        unspaced_arrow.key_bindings[0].1,
+        CanonicalBinding::RequestParameter { .. }
+    ));
+
+    let jwt_request_predicate = parse_parameter_lookup_plan(
+        "SELECT workspace_id FROM Membership WHERE user_id = auth.user_id() AND request.jwt() ->> 'role' = 'admin'",
+    )
+    .expect("JWT request predicates should parse");
+    assert_eq!(jwt_request_predicate.key_bindings.len(), 1);
+    assert_eq!(jwt_request_predicate.key_bindings[0].0, "user_id");
 }
 
 #[test]
@@ -255,12 +301,12 @@ fn parameter_lookup_plan_rejects_unsupported_forms() {
             "binding = binding",
         ),
         (
-            "SELECT id FROM Membership WHERE id = connection.parameter('id')",
-            "unsupported binding",
-        ),
-        (
             "SELECT id FROM analytics.Membership WHERE id = auth.user_id()",
             "public schema",
+        ),
+        (
+            "SELECT id FROM Membership WHERE id = request.parameter_array('ids')",
+            "unsupported binding",
         ),
     ] {
         let error = parse_parameter_lookup_plan(query)

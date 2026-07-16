@@ -19,7 +19,7 @@ use storage::{build_storage, Storage, StorageBackend};
 pub type SharedStorage = Arc<dyn Storage>;
 
 pub fn build_app() -> Router {
-    build_app_with_storage(build_storage(StorageBackend::from_env()))
+    build_app_with_storage(build_storage(StorageBackend::WireMdbx))
 }
 
 pub fn build_app_with_storage(storage: SharedStorage) -> Router {

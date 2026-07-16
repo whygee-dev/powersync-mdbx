@@ -40,7 +40,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let runtime_plan = RuntimePlan::from_env()?;
     runtime_plan.ensure_supported_bootstrap()?;
     let replication_options = ReplicationRunnerOptions::from_env()?;
-    let storage_backend = StorageBackend::from_env();
+    // The binary always serves replication-backed MDBX state; the SyncEdge
+    // fixture backend is constructed only by tests.
+    let storage_backend = StorageBackend::WireMdbx;
     let service_context = ServiceContext::from_env()?;
 
     match runtime_plan.service_mode {

@@ -1,7 +1,7 @@
 mod sync_edge;
 mod wire_mdbx;
 
-use std::{collections::BTreeMap, env, future::Future, pin::Pin, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, future::Future, pin::Pin, sync::Arc, time::Duration};
 
 use bytes::Bytes;
 
@@ -212,25 +212,12 @@ pub trait Storage: Send + Sync {
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum StorageBackend {
-    /// Static fixture backend used by HTTP contract tests.
+    /// Static fixture backend used by HTTP contract tests. Never constructed
+    /// by the production binary: only test code that names this variant
+    /// explicitly can serve fixture data.
     SyncEdge,
     /// Production backend: replication-backed MDBX state.
     WireMdbx,
-}
-
-impl StorageBackend {
-    pub fn from_env() -> Self {
-        let raw = env::var("POWERSYNC_RUST_STORAGE_BACKEND").ok();
-        Self::from_optional_str(raw.as_deref())
-    }
-
-    fn from_optional_str(raw: Option<&str>) -> Self {
-        match raw.unwrap_or("wire-mdbx").to_lowercase().as_str() {
-            "sync-edge" | "sync_edge" => Self::SyncEdge,
-            "wire-mdbx" | "wire_mdbx" => Self::WireMdbx,
-            _ => Self::WireMdbx,
-        }
-    }
 }
 
 pub fn build_storage(backend: StorageBackend) -> Arc<dyn Storage> {
@@ -242,44 +229,8 @@ pub fn build_storage(backend: StorageBackend) -> Arc<dyn Storage> {
 
 #[cfg(test)]
 mod tests {
-    use super::{StorageBackend, SyncBucketCursors};
+    use super::SyncBucketCursors;
     use crate::sync_rules::{default_bucket_requests, DEFAULT_TASKS_BUCKET_NAME};
-
-    #[test]
-    fn storage_backend_defaults_to_wire_mdbx_for_missing_value_and_falls_back_for_unknown() {
-        assert_eq!(
-            StorageBackend::from_optional_str(Some("unknown")),
-            StorageBackend::WireMdbx
-        );
-        assert_eq!(
-            StorageBackend::from_optional_str(None),
-            StorageBackend::WireMdbx
-        );
-    }
-
-    #[test]
-    fn storage_backend_parses_sync_edge_aliases() {
-        assert_eq!(
-            StorageBackend::from_optional_str(Some("sync-edge")),
-            StorageBackend::SyncEdge
-        );
-        assert_eq!(
-            StorageBackend::from_optional_str(Some("sync_edge")),
-            StorageBackend::SyncEdge
-        );
-    }
-
-    #[test]
-    fn storage_backend_parses_wire_mdbx_aliases() {
-        assert_eq!(
-            StorageBackend::from_optional_str(Some("wire-mdbx")),
-            StorageBackend::WireMdbx
-        );
-        assert_eq!(
-            StorageBackend::from_optional_str(Some("wire_mdbx")),
-            StorageBackend::WireMdbx
-        );
-    }
 
     #[test]
     fn sync_bucket_cursors_update_global_after_without_default_bucket_special_casing() {
