@@ -15,13 +15,14 @@ node --check scripts/official_resource_calibration.mjs
 node --check scripts/linux_canary_ladder.mjs
 node --check scripts/export_artifacts.mjs
 node --check scripts/export_canary_ladder.mjs
+node --check scripts/public_resource_evidence.mjs
 node --test scripts/*.test.mjs
 npm --prefix e2e/official-sdk audit
 npm --prefix e2e/official-sdk run build
 cargo audit
 ```
 
-CI runs these checks for pull requests and pushes to `main`. It also starts PostgreSQL with logical WAL and runs the ignored live-replication smoke tests.
+CI runs these checks for pull requests and pushes to `main`; the two audit commands consult live advisory databases and do not gate CI. It also starts PostgreSQL with logical WAL and runs the ignored live-replication smoke tests.
 
 The Rust toolchain is pinned by `rust-toolchain.toml`. `.nvmrc` constrains Node to major version 24.
 

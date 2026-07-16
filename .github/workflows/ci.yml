@@ -37,7 +37,10 @@ jobs:
       - name: cargo test
         run: cargo test --locked -q
 
-      - name: cargo audit
+      # Advisory-database checks can newly fail without a code change; they
+      # inform but do not gate.
+      - name: cargo audit (advisory)
+        continue-on-error: true
         run: |
           cargo install cargo-audit --version 0.22.2 --locked
           cargo audit
@@ -60,8 +63,11 @@ jobs:
       - name: e2e build
         run: |
           npm --prefix e2e/official-sdk ci
-          npm --prefix e2e/official-sdk audit
           npm --prefix e2e/official-sdk run build
+
+      - name: npm audit (advisory)
+        continue-on-error: true
+        run: npm --prefix e2e/official-sdk audit
 
   live-replication:
     runs-on: ubuntu-24.04

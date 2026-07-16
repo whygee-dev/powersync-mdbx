@@ -52,6 +52,6 @@ The machine-readable [canary summary](canary-summary.json) retains each componen
 
 ## Provenance
 
-The ladder ran the local Rust image by immutable image ID `sha256:2e2f3663c88832a3f91e7c428feb9431d7228379876794395d5024fc4283c637`. PowerSync, MongoDB, and PostgreSQL inputs were pinned by registry digest. The Docker server reported Linux/aarch64, 6 CPUs, and 16,748,593,152 bytes of memory.
+The ladder ran the local Rust image by immutable image ID `sha256:2e2f3663c88832a3f91e7c428feb9431d7228379876794395d5024fc4283c637`. PowerSync, MongoDB, and PostgreSQL inputs were pinned by registry digest; `canary-summary.json` records the digests only. The pinned official digest `sha256:b6b22fa7d0d862f04bdff62846e656756d17bcf3dd6eca399a0633671051438b` is the manifest-list digest of `journeyapps/powersync-service:1.23.3` on Docker Hub, which is where the version stated above comes from. The Docker server reported Linux/aarch64, 6 CPUs, and 16,748,593,152 bytes of memory.
 
 The full ladder took 16 minutes 52 seconds. Compressed per-bucket validation records and full resource snapshots occupy about 13 GiB locally and are not checked into Git.

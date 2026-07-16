@@ -53,7 +53,7 @@ The fixture contains tasks, projects, organizations, memberships, comments, and,
 
 The auth-perimeter subscription derives project ids from `auth.user_id()` through `user_project_access`. A separate no-access JWT probe supplies a valid project id through client-controlled parameters and must receive no checkpoint or data buckets.
 
-Both targets resolve the `user_project_access` lookup from their own materialized stores at request time: the official service from MongoDB, and Rust from parameter-lookup entries materialized into MDBX during ingestion. Neither target opens a PostgreSQL connection on the `/sync/stream` path.
+At request time, Rust resolves the `user_project_access` lookup from parameter-lookup entries materialized into MDBX during ingestion; its `/sync/stream` path opens no PostgreSQL connection. The official service is deployed on MongoDB bucket storage, which its documented architecture uses to serve sync streams without querying PostgreSQL per request.
 
 The retained historical artifacts do not identify their issuer-validation policy, so the spoof probe is evidence about routing authorization only, not parity of the products' complete JWT validation policies. The current harness supplies audience and issuer claims, configures audience validation on both targets and issuer validation on Rust, and records that asymmetry in fresh results.
 
@@ -109,6 +109,6 @@ A comparison used to estimate a distribution, variance, or tail latency must:
 
 ## Command
 
-The native and symmetric canary invocations are in the repository README. Set `POWERSYNC_USER_VALUE_CHURN_GATE_MODE=slot-lsn` for a common PostgreSQL-side churn finish line and `POWERSYNC_USER_VALUE_INITIAL_READINESS=sync-protocol` for the common client-visible initial finish line. Native runs remain exploratory. A repeated publication matrix uses the symmetric runner and all preflight controls above.
+The symmetric canary invocation is in the repository README. Set `POWERSYNC_USER_VALUE_CHURN_GATE_MODE=slot-lsn` for a common PostgreSQL-side churn finish line and `POWERSYNC_USER_VALUE_INITIAL_READINESS=sync-protocol` for the common client-visible initial finish line. Native runs remain exploratory. A repeated publication matrix uses the symmetric runner and all preflight controls above.
 
 Run `node scripts/official_resource_calibration.mjs` before freezing a matrix configuration. It compares four official-service/MongoDB CPU splits at 250k, keeps the total budget and storage tuning fixed, reverses candidate order on the second pass, and rejects samples without complete initial CPU, memory, cgroup I/O, network, storage-growth, and WAL-position evidence.

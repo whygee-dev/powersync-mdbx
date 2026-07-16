@@ -5,6 +5,7 @@ edition = "2021"
 description = "Rust/MDBX implementation of PostgreSQL-to-PowerSync bucket replication for protocol and performance research."
 readme = "../../README.md"
 license = "Apache-2.0"
+repository = "https://github.com/whygee-dev/powersync-mdbx"
 publish = false
 
 [dependencies]

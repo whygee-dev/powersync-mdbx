@@ -95,7 +95,7 @@ Memory values are cgroup lifetime peaks, so MongoDB includes provisioning before
 
 The resource evidence constrains how the ratios can be explained. The following observations are arithmetic on the recorded values.
 
-Both targets scale close to linearly. Official protocol readiness stays between 63.5 and 81.8 s per million source task rows across the rungs, Rust between 5.9 and 7.0 s per million, and the ratio between 10.8x and 11.9x over a twentyfold row-count range. The measured difference is a per-row cost factor, not a difference in asymptotic behavior.
+Both targets scale close to linearly. Official protocol readiness stays between 63.5 and 81.8 s per million source task rows across the rungs, Rust between 5.8 and 7.0 s per million, and the ratio between 10.8x and 11.9x over a twentyfold row-count range. The measured difference is a per-row cost factor, not a difference in asymptotic behavior.
 
 The CPU gap is larger than the elapsed-time gap. At the 5m rung the official target consumed 490.15 CPU-s across service and MongoDB against 23.50 CPU-s for Rust, a factor of 20.9, or roughly 98 µs against 5 µs of CPU per source task row; the 250k, 1m, and 2m rungs show 19.2x, 18.5x, and 21.5x. The allocation was not the binding constraint on average: over the 5m initial window the official service averaged 0.68 of its 1.5 CPUs, MongoDB 0.70 of its 2.5, and the Rust service 0.73 of its 4. Window averages do not rule out short bursts at the limits.
 
@@ -134,6 +134,7 @@ node --check scripts/official_resource_calibration.mjs
 node --check scripts/linux_canary_ladder.mjs
 node --check scripts/export_artifacts.mjs
 node --check scripts/export_canary_ladder.mjs
+node --check scripts/public_resource_evidence.mjs
 node --test scripts/*.test.mjs
 npm --prefix e2e/official-sdk audit
 npm --prefix e2e/official-sdk run build

@@ -36,7 +36,7 @@ When `POWERSYNC_USER_VALUE_CHURN_GATE=1` is enabled, the benchmark additionally:
 6. validates each target's checkpoint count/checksum recurrence from its own emitted checksums.
 7. compares client-visible PUT/REMOVE operation digests across targets separately from checksum/subkey wire digests.
 
-Historical 1m auth-perimeter parity-gated artifact summary (source revision unidentified):
+Historical 1m auth-perimeter artifact summary (source revision unidentified):
 
 - artifact: `docs/artifacts/1m-auth-perimeter/parity-summary.json`.
 - repeats: 5 paired interleaved official/Rust runs.
