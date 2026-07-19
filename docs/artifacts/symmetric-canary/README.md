@@ -8,6 +8,13 @@ Both targets ran in Linux containers on the same Docker Desktop network. Each ta
 
 Protocol readiness is the first successful expected-state proof for one routed subscription through `/sync/stream` and `checkpoint_complete`. Complete materialization is a separate target-specific boundary. The official service reports initial replication completion and its LSN; Rust persists the source LSN atomically with its internal snapshot-complete marker.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="readiness-dark.svg">
+  <img alt="Protocol readiness by rung: official 20.5, 63.6, 146.1, and 356.9 s against Rust/MDBX 1.7, 5.9, 12.2, and 32.2 s; ratios 10.8x to 11.9x" src="readiness.svg" width="920">
+</picture>
+
+The figure is generated from [canary-summary.json](canary-summary.json) by `scripts/canary_chart.mjs`.
+
 | Source task rows | Official protocol readiness | Rust/MDBX protocol readiness | Official / Rust |
 | ---: | ---: | ---: | ---: |
 | 250,202 | 20.465 s | 1.743 s | 11.740x |

@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="320" viewBox="0 0 920 320" role="img">
+<rect width="920" height="320" fill="#1a1a19"/>
+<text x="16" y="26" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="600" fill="#ffffff">Initial replication — protocol readiness by rung</text>
+<text x="16" y="44" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11.5" fill="#c3c2b7">first proven /sync/stream checkpoint for one routed subscription; one measured run per target and rung</text>
+<rect x="16" y="61" width="10" height="10" rx="2" fill="#3987e5"/>
+<text x="31" y="70" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" fill="#c3c2b7">official PowerSync 1.23.3</text>
+<rect x="192" y="61" width="10" height="10" rx="2" fill="#008300"/>
+<text x="207" y="70" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" fill="#c3c2b7">Rust/MDBX</text>
+<text x="904" y="82" text-anchor="end" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="10.5" fill="#898781">official / Rust</text>
+<line x1="124.00" y1="88" x2="124.00" y2="286" stroke="#2c2c2a" stroke-width="1"/>
+<text x="124.00" y="302" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="10.5" fill="#898781">0</text>
+<line x1="289.00" y1="88" x2="289.00" y2="286" stroke="#2c2c2a" stroke-width="1"/>
+<text x="289.00" y="302" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="10.5" fill="#898781">100</text>
+<line x1="454.00" y1="88" x2="454.00" y2="286" stroke="#2c2c2a" stroke-width="1"/>
+<text x="454.00" y="302" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="10.5" fill="#898781">200</text>
+<line x1="619.00" y1="88" x2="619.00" y2="286" stroke="#2c2c2a" stroke-width="1"/>
+<text x="619.00" y="302" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="10.5" fill="#898781">300</text>
+<line x1="784.00" y1="88" x2="784.00" y2="286" stroke="#2c2c2a" stroke-width="1"/>
+<text x="784.00" y="302" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="10.5" fill="#898781">400 s</text>
+<text x="112" y="113" text-anchor="end" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" fill="#c3c2b7">250,202 rows</text>
+<path d="M124,96 h29.77 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-29.77 z" fill="#3987e5"/>
+<text x="164.77" y="108" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" fill="#ffffff">20.5 s</text>
+<path d="M124,114 h1.44 a1.4381193749999994,1.4381193749999994 0 0 1 1.4381193749999994,1.4381193749999994 v13.123761250000001 a1.4381193749999994,1.4381193749999994 0 0 1 -1.4381193749999994,1.4381193749999994 h-1.44 z" fill="#008300"/>
+<text x="133.88" y="126" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" fill="#ffffff">1.7 s</text>
+<text x="904" y="113" text-anchor="end" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" fill="#898781">11.7x</text>
+<text x="112" y="163" text-anchor="end" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" fill="#c3c2b7">1,000,402 rows</text>
+<path d="M124,146 h100.87 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-100.87 z" fill="#3987e5"/>
+<text x="235.87" y="158" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" fill="#ffffff">63.6 s</text>
+<path d="M124,164 h5.69 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-5.69 z" fill="#008300"/>
+<text x="140.69" y="176" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" fill="#ffffff">5.9 s</text>
+<text x="904" y="163" text-anchor="end" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" fill="#898781">10.8x</text>
+<text x="112" y="213" text-anchor="end" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" fill="#c3c2b7">2,000,802 rows</text>
+<path d="M124,196 h237.00 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-237.00 z" fill="#3987e5"/>
+<text x="372.00" y="208" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" fill="#ffffff">146.1 s</text>
+<path d="M124,214 h16.20 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-16.20 z" fill="#008300"/>
+<text x="151.20" y="226" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" fill="#ffffff">12.2 s</text>
+<text x="904" y="213" text-anchor="end" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" fill="#898781">11.9x</text>
+<text x="112" y="263" text-anchor="end" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" fill="#c3c2b7">5,001,002 rows</text>
+<path d="M124,246 h584.83 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-584.83 z" fill="#3987e5"/>
+<text x="719.83" y="258" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" fill="#ffffff">356.9 s</text>
+<path d="M124,264 h49.10 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-49.10 z" fill="#008300"/>
+<text x="184.10" y="276" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" fill="#ffffff">32.2 s</text>
+<text x="904" y="263" text-anchor="end" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" fill="#898781">11.1x</text>
+</svg>

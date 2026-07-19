@@ -67,6 +67,11 @@ Both targets ran as Linux containers on one Docker Desktop network with the same
 
 The headline boundary is the first `/sync/stream` response that proves the expected state of one routed subscription through `checkpoint_complete`. Complete source materialization is measured separately using each implementation's internal completion contract. Every target started with an empty store.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/artifacts/symmetric-canary/readiness-dark.svg">
+  <img alt="Protocol readiness by rung: official 20.5, 63.6, 146.1, and 356.9 s against Rust/MDBX 1.7, 5.9, 12.2, and 32.2 s; ratios 10.8x to 11.9x" src="docs/artifacts/symmetric-canary/readiness.svg" width="920">
+</picture>
+
 | Source task rows | Official protocol readiness | Rust/MDBX protocol readiness | Official / Rust |
 | ---: | ---: | ---: | ---: |
 | 250,202 | 20.46 s | 1.74 s | 11.74x |
@@ -93,7 +98,7 @@ Memory values are cgroup lifetime peaks, so MongoDB includes provisioning before
 
 ### Reading the results
 
-The resource evidence constrains how the ratios can be explained. The following observations are arithmetic on the recorded values, except the profiling paragraph, which cites its own labeled diagnostic artifact.
+The resource evidence constrains how the ratios can be explained. The following observations are arithmetic on the recorded values, except the profiling figures, which cite their own labeled diagnostic artifact.
 
 Both targets scale close to linearly. Official protocol readiness stays between 63.5 and 81.8 s per million source task rows across the rungs, Rust between 5.8 and 7.0 s per million, and the ratio between 10.8x and 11.9x over a twentyfold row-count range. The measured difference is a per-row cost factor, not a difference in asymptotic behavior.
 
@@ -101,7 +106,19 @@ The CPU gap is larger than the elapsed-time gap. At the 5m rung the official tar
 
 Moving derived state dominates the official target's traffic. Within the 5m initial window MongoDB's receive counter recorded 9.31 GiB, matching the service's transmit; the Rust service, whose inbound traffic is essentially the PostgreSQL scan, received 1.27 GiB and transmitted 2.6 MiB. Its derived writes go to the in-process MDBX map and never cross a socket. Peak memory shows the same shape: 90 MiB for Rust against 274 MiB for the official service plus 5,922 MiB for MongoDB.
 
-A separate diagnostic run attributes part of the official target's CPU cost directly. V8 CPU profiles of the service's main thread, captured with the [profiling recipe](docs/benchmark.md) over three initial replications of the 5m fixture and rolled up in the [profile artifact](docs/artifacts/official-cpu-profile-5m/README.md), record that thread off-CPU for 45.1% of profiled time even with the container's CPU limit removed. Of its active CPU, BSON encoding and the MongoDB driver — marshalling derived state to and from bucket storage — took 32.9%, more than the service's own row processing — Postgres decode, sync-rules evaluation, JSON serialization, storage batching, and service glue — at 22.3%; garbage collection observed on that thread took 7.2%, and Node/V8 runtime and utility dependencies the remaining 37.6%. The profiled topology was official-only and uncapped, so these shares do not combine with canary values, and MongoDB — slightly more than half the official target's total CPU at the 5m rung — is outside the profile.
+A separate diagnostic run attributes part of the official target's CPU cost directly: V8 profiles of the service's main thread over three initial replications of the 5m fixture, uncapped and official-only, rolled up in the [profile artifact](docs/artifacts/official-cpu-profile-5m/README.md).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/artifacts/official-cpu-profile-5m/attribution-dark.svg">
+  <img alt="Official service main thread: idle 45.1% of profiled time; of active CPU, BSON + MongoDB driver 32.9%, row processing 22.3%, GC 7.2%, runtime and dependencies 37.6%" src="docs/artifacts/official-cpu-profile-5m/attribution.svg" width="920">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/artifacts/official-cpu-profile-5m/flamegraph-dark.svg">
+  <img alt="Flamegraph of the official service main thread's active CPU, dominated by BSON and MongoDB driver serialization under the service's replication and storage-batching frames" src="docs/artifacts/official-cpu-profile-5m/flamegraph.svg" width="960">
+</picture>
+
+Even with the container's CPU limit removed, the main thread was off-CPU 45.1% of profiled time, and marshalling derived state through BSON and the MongoDB driver cost more active CPU than all of the service's own row processing; garbage collection on that thread was 7.2%. These shares do not combine with canary values, and MongoDB — slightly more than half the official target's total CPU at this rung — is outside the profile.
 
 The evidence is not one-sided. Rust's allocated storage grew 7.73 GiB at the 5m rung against the official target's 3.63 GiB; uncompressed on-disk state is part of the price of the write path described above.
 
@@ -137,6 +154,9 @@ node --check scripts/linux_canary_ladder.mjs
 node --check scripts/export_artifacts.mjs
 node --check scripts/export_canary_ladder.mjs
 node --check scripts/public_resource_evidence.mjs
+node --check scripts/profile_rollup.mjs
+node --check scripts/profile_charts.mjs
+node --check scripts/canary_chart.mjs
 node --test scripts/*.test.mjs
 npm --prefix e2e/official-sdk audit
 npm --prefix e2e/official-sdk run build
@@ -225,6 +245,8 @@ Repeated publication matrices additionally require a Linux host running the symm
 - `scripts/linux_canary_ladder.mjs`: bounded release-candidate ladder;
 - `scripts/resource_evidence.mjs`: Linux cgroup/proc and storage/WAL accounting;
 - `scripts/profile_rollup.mjs`: official-service CPU-profile category rollup;
+- `scripts/profile_charts.mjs`: attribution and flamegraph figures from those profiles;
+- `scripts/canary_chart.mjs`: readiness figure from the canary summary;
 - `e2e/official-sdk/`: protocol validation using the PowerSync JavaScript packages;
 - `docs/`: scope, correctness boundary, methodology, and historical artifacts.
 

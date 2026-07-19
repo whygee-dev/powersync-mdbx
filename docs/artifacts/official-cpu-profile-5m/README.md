@@ -15,7 +15,19 @@ This is not the canary topology, and these timings are not comparable to canary 
 
 ## Attribution
 
-`scripts/profile_rollup.mjs` attributes each sample's forward time delta to a category by frame name and source URL; [rollup.md](rollup.md) is its verbatim per-profile and aggregate output. Aggregate over the three profiles, 1,363.9 s of profiled self time:
+`scripts/profile_rollup.mjs` attributes each sample's forward time delta to a category by frame name and source URL; [rollup.md](rollup.md) is its verbatim per-profile and aggregate output. The figures below are generated from the same profiles by `scripts/profile_charts.mjs`, which reuses the rollup's categorization.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="attribution-dark.svg">
+  <img alt="Official service main thread: idle 45.1% of profiled time; of active CPU, BSON + MongoDB driver 32.9%, row processing 22.3%, GC 7.2%, runtime and dependencies 37.6%" src="attribution.svg" width="920">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="flamegraph-dark.svg">
+  <img alt="Flamegraph of the merged active CPU time, dominated by BSON and MongoDB driver serialization under the service's replication and storage-batching frames" src="flamegraph.svg" width="960">
+</picture>
+
+Aggregate over the three profiles, 1,363.9 s of profiled self time:
 
 | Category | Self time (ms) | Share |
 | --- | ---: | ---: |
@@ -65,4 +77,5 @@ POWERSYNC_USER_VALUE_PROCESSING_ONLY=1 \
 POWERSYNC_USER_VALUE_OFFICIAL_PROFILE_DIR="$PWD/tmp/profiles/headline-5m" \
 node scripts/user_value_benchmark.mjs
 node scripts/profile_rollup.mjs tmp/profiles/headline-5m
+node scripts/profile_charts.mjs tmp/profiles/headline-5m docs/artifacts/official-cpu-profile-5m
 ```

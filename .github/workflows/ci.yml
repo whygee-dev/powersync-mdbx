@@ -58,6 +58,9 @@ jobs:
           node --check scripts/export_artifacts.mjs
           node --check scripts/export_canary_ladder.mjs
           node --check scripts/public_resource_evidence.mjs
+          node --check scripts/profile_rollup.mjs
+          node --check scripts/profile_charts.mjs
+          node --check scripts/canary_chart.mjs
           node --test scripts/*.test.mjs
 
       - name: e2e build
