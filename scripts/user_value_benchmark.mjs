@@ -229,6 +229,7 @@ const rustReplicationFeedback = {
 };
 const officialMongoCacheGb = process.env.POWERSYNC_USER_VALUE_MONGO_CACHE_GB ?? null;
 const officialNodeOptions = process.env.POWERSYNC_USER_VALUE_OFFICIAL_NODE_OPTIONS ?? null;
+const officialProfileDir = process.env.POWERSYNC_USER_VALUE_OFFICIAL_PROFILE_DIR ?? null;
 const officialConfigExtraYaml = process.env.POWERSYNC_USER_VALUE_OFFICIAL_CONFIG_EXTRA ?? null;
 const rustLiveUnifiedBench = process.env.POWERSYNC_RUST_LIVE_UNIFIED_BENCH !== '0';
 const rustInitialSnapshotEnabled = process.env.POWERSYNC_RUST_INITIAL_SNAPSHOT ?? '1';
@@ -500,6 +501,38 @@ try {
 }
 }
 
+const officialProfileFlags = '--cpu-prof --cpu-prof-dir=/profiles';
+
+function officialProfileEnv(profileDir, nodeOptions) {
+  if (profileDir == null) {
+    return { mountArgs: [], nodeOptions };
+  }
+  if (!path.isAbsolute(profileDir)) {
+    throw new Error(
+      `POWERSYNC_USER_VALUE_OFFICIAL_PROFILE_DIR must be an absolute path, got ${profileDir}`
+    );
+  }
+  return {
+    mountArgs: ['-v', `${profileDir}:/profiles`],
+    nodeOptions: nodeOptions ? `${nodeOptions} ${officialProfileFlags}` : officialProfileFlags
+  };
+}
+
+function officialTeardownCommands(profileDir, containerName) {
+  const commands = [];
+  if (profileDir != null) {
+    commands.push(['stop', '-t', '60', containerName]);
+  }
+  commands.push(['rm', '-f', containerName]);
+  return commands;
+}
+
+function profileArtifactWarning(profileDir, fileNames) {
+  if (profileDir == null) return null;
+  if (fileNames.some((name) => name.endsWith('.cpuprofile'))) return null;
+  return `no .cpuprofile files in ${profileDir}; the service may not have exited cleanly within the stop grace period`;
+}
+
 if (isDirectRun()) {
   process.once('SIGINT', () => void shutdownOnSignal('SIGINT'));
   process.once('SIGTERM', () => void shutdownOnSignal('SIGTERM'));
@@ -569,7 +602,10 @@ export {
   isRetryableChurnProtocolConvergenceError,
   isRetryableProtocolReadinessError,
   observeRustChurnMetricsAfterPublicTiming,
+  officialProfileEnv,
+  officialTeardownCommands,
   percentile,
+  profileArtifactWarning,
   readinessAuthPerimeterRow,
   resetObservedBucketState,
   renderMarkdown,
@@ -673,6 +709,7 @@ function runtimePublicRunPreflightInput() {
     resourceEvidenceEnabled: symmetricDockerRuntime,
     appendOnlyArtifacts: !destructiveArtifactCleanupRequested,
     officialTuningReviewed,
+    officialProfileDir,
     gitDirty: Boolean(tryCaptureVersion('git', ['status', '--porcelain']))
   };
 }
@@ -733,6 +770,7 @@ function assertPublicRunPreflight(input) {
   }
   if (input.appendOnlyArtifacts !== true) issues.push('artifact storage must be append-only for the matrix');
   if (input.officialTuningReviewed !== true) issues.push('official-service tuning must be reviewed by the PowerSync team');
+  if (input.officialProfileDir != null) issues.push('CPU profiling must be disabled for the matrix');
   if (input.gitDirty !== false) issues.push('the benchmark must run from a clean Git worktree');
   if (issues.length > 0) {
     throw new Error(`public benchmark preflight failed:\n- ${issues.join('\n- ')}`);
@@ -2100,6 +2138,10 @@ async function startOfficialService(syncRulesYaml, { port: portOverride } = {}) 
   const configYaml = officialConfigYaml(syncRulesYaml);
   const encodedConfig = Buffer.from(configYaml, 'utf8').toString('base64');
 
+  const profile = officialProfileEnv(officialProfileDir, officialNodeOptions);
+  if (officialProfileDir != null) {
+    fs.mkdirSync(officialProfileDir, { recursive: true });
+  }
   run('docker', [
     'run',
     '-d',
@@ -2109,11 +2151,12 @@ async function startOfficialService(syncRulesYaml, { port: portOverride } = {}) 
     composeNetwork,
     '--rm',
     ...serviceResourceArgs('official'),
+    ...profile.mountArgs,
     '-p',
     port == null ? '127.0.0.1::8080' : `127.0.0.1:${port}:8080`,
     '-e',
     `POWERSYNC_CONFIG_B64=${encodedConfig}`,
-    ...(officialNodeOptions ? ['-e', `NODE_OPTIONS=${officialNodeOptions}`] : []),
+    ...(profile.nodeOptions ? ['-e', `NODE_OPTIONS=${profile.nodeOptions}`] : []),
     officialImage
   ]);
   officialRunning = true;
@@ -2129,7 +2172,16 @@ async function stopOfficialService() {
 async function stopOfficialServiceWithOptions({ keepMongo = false } = {}) {
   if (officialRunning) {
     captureDockerLogs(officialContainer, officialLogPath);
-    spawnSync('docker', ['rm', '-f', officialContainer], { stdio: 'ignore' });
+    for (const args of officialTeardownCommands(officialProfileDir, officialContainer)) {
+      spawnSync('docker', args, { stdio: 'ignore' });
+    }
+    const warning = profileArtifactWarning(
+      officialProfileDir,
+      officialProfileDir != null && fs.existsSync(officialProfileDir)
+        ? fs.readdirSync(officialProfileDir)
+        : []
+    );
+    if (warning != null) console.warn(warning);
     officialRunning = false;
     officialLogPath = null;
     await delay(250);

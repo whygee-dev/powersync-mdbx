@@ -28,7 +28,10 @@ import {
   isRetryableProtocolReadinessError,
   normalizeDecimalCursor,
   observeRustChurnMetricsAfterPublicTiming,
+  officialProfileEnv,
+  officialTeardownCommands,
   percentile,
+  profileArtifactWarning,
   readinessAuthPerimeterRow,
   resetObservedBucketState,
   renderMarkdown,
@@ -152,9 +155,8 @@ test('benchmark JWTs are minted with a fresh full lifetime for each request', ()
   assert.equal(second.exp, 1_500);
 });
 
-test('public benchmark preflight accepts only a fully specified publication run', () => {
-  const digest = `example.invalid/image@sha256:${'a'.repeat(64)}`;
-  const valid = {
+function buildValidPreflightFixture(digest) {
+  return {
     platform: 'linux',
     targets: ['official', 'rust'],
     deploymentModel: 'symmetric-linux-containers',
@@ -179,10 +181,25 @@ test('public benchmark preflight accepts only a fully specified publication run'
     officialTuningReviewed: true,
     gitDirty: false
   };
+}
+
+test('public benchmark preflight accepts only a fully specified publication run', () => {
+  const digest = `example.invalid/image@sha256:${'a'.repeat(64)}`;
+  const valid = buildValidPreflightFixture(digest);
   assert.doesNotThrow(() => assertPublicRunPreflight(valid));
   assert.throws(
     () => assertPublicRunPreflight({ ...valid, measuredRepeats: 5, imageInputs: { official: 'image:latest' } }),
     /official image must be pinned.*mongo image must be pinned.*rust image must be pinned.*at least 20 measured paired repeats/s
+  );
+});
+
+test('public benchmark preflight rejects profiling runs', () => {
+  const digest = `example.invalid/image@sha256:${'a'.repeat(64)}`;
+  const valid = buildValidPreflightFixture(digest);
+  assert.doesNotThrow(() => assertPublicRunPreflight(valid));
+  assert.throws(
+    () => assertPublicRunPreflight({ ...valid, officialProfileDir: '/tmp/profiles' }),
+    /CPU profiling must be disabled for the matrix/
   );
 });
 
@@ -893,3 +910,35 @@ function taskRow(overrides = {}) {
     ...overrides
   };
 }
+
+test('official profile knob composes mount and NODE_OPTIONS flags', () => {
+  assert.deepEqual(officialProfileEnv(null, null), { mountArgs: [], nodeOptions: null });
+  assert.deepEqual(officialProfileEnv(null, '--max-old-space-size=4096'), {
+    mountArgs: [],
+    nodeOptions: '--max-old-space-size=4096'
+  });
+  assert.deepEqual(officialProfileEnv('/abs/profiles', null), {
+    mountArgs: ['-v', '/abs/profiles:/profiles'],
+    nodeOptions: '--cpu-prof --cpu-prof-dir=/profiles'
+  });
+  assert.equal(
+    officialProfileEnv('/abs/profiles', '--max-old-space-size=4096').nodeOptions,
+    '--max-old-space-size=4096 --cpu-prof --cpu-prof-dir=/profiles'
+  );
+  assert.throws(() => officialProfileEnv('relative/dir', null), /must be an absolute path/);
+});
+
+test('official teardown stops gracefully only when profiling', () => {
+  assert.deepEqual(officialTeardownCommands(null, 'c'), [['rm', '-f', 'c']]);
+  assert.deepEqual(officialTeardownCommands('/p', 'c'), [
+    ['stop', '-t', '60', 'c'],
+    ['rm', '-f', 'c']
+  ]);
+});
+
+test('profile artifact warning fires only for profile dirs without profiles', () => {
+  assert.equal(profileArtifactWarning(null, []), null);
+  assert.equal(profileArtifactWarning('/p', ['CPU.20260719.1.cpuprofile']), null);
+  assert.match(profileArtifactWarning('/p', ['service.log']), /no \.cpuprofile files/);
+  assert.match(profileArtifactWarning('/p', []), /no \.cpuprofile files/);
+});

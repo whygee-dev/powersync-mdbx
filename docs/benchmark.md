@@ -112,3 +112,11 @@ A comparison used to estimate a distribution, variance, or tail latency must:
 The symmetric canary invocation is in the repository README. Set `POWERSYNC_USER_VALUE_CHURN_GATE_MODE=slot-lsn` for a common PostgreSQL-side churn finish line and `POWERSYNC_USER_VALUE_INITIAL_READINESS=sync-protocol` for the common client-visible initial finish line. Native runs remain exploratory. A repeated publication matrix uses the symmetric runner and all preflight controls above.
 
 Run `node scripts/official_resource_calibration.mjs` before freezing a matrix configuration. It compares four official-service/MongoDB CPU splits at 250k, keeps the total budget and storage tuning fixed, reverses candidate order on the second pass, and rejects samples without complete initial CPU, memory, cgroup I/O, network, storage-growth, and WAL-position evidence.
+
+## Diagnostic CPU profiling
+
+`POWERSYNC_USER_VALUE_OFFICIAL_PROFILE_DIR=<absolute path>` captures V8 CPU profiles from the official service container during a run. It changes three things: the directory is bind-mounted into the container as `/profiles`; `--cpu-prof --cpu-prof-dir=/profiles` is appended to the service's `NODE_OPTIONS`; and the container is stopped with `docker stop -t 60` before `docker rm -f`, so Node flushes each profile on the `SIGTERM` graceful shutdown instead of being killed. If no `.cpuprofile` file lands in the directory, the harness warns that the service did not exit cleanly within the stop grace period.
+
+`node scripts/profile_rollup.mjs <dir>` parses every `.cpuprofile` in the directory and prints per-file and aggregate self-time tables; unparsable files are skipped with a warning. It attributes each sample's forward time delta to a category. The synthetic GC, program, and idle frames are matched by frame name; frames without a source URL count as native builtins; every other frame is categorized by its URL: the service's own `sync-rules`, `jsonbig`, `mongo storage`, `postgres replication`, `powersync service`, and `logging` packages; the MongoDB driver and BSON; Node core; and the residual `other` bucket.
+
+Profiled runs are diagnostics only. They are not part of the published evidence chain, and `POWERSYNC_USER_VALUE_PUBLIC_RUN=1` rejects any run that sets `POWERSYNC_USER_VALUE_OFFICIAL_PROFILE_DIR`.
