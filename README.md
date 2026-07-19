@@ -118,7 +118,7 @@ A separate diagnostic run attributes part of the official target's CPU cost dire
   <img alt="Flamegraph of the official service main thread's active CPU, dominated by BSON and MongoDB driver serialization under the service's replication and storage-batching frames" src="docs/artifacts/official-cpu-profile-5m/flamegraph.svg" width="960">
 </picture>
 
-Even with the container's CPU limit removed, the main thread was off-CPU 45.1% of profiled time, and marshalling derived state through BSON and the MongoDB driver cost more active CPU than all of the service's own row processing; garbage collection on that thread was 7.2%. These shares do not combine with canary values, and MongoDB — slightly more than half the official target's total CPU at this rung — is outside the profile.
+Even with the container's CPU limit removed, the main thread was off-CPU 45.1% of profiled time, and marshalling derived state through BSON and the MongoDB driver cost more active CPU than all of the service's own row processing; garbage collection on that thread was 7.2%. Re-attributing native and Node-core frames to their nearest categorized caller raises the marshalling share to 47.6% of active CPU, and the idle time resolves into roughly sixty 2–100 ms waits per second, 68% of them immediately after a marshalling frame ([decomposition](docs/artifacts/official-cpu-profile-5m/decompose.md)). These shares do not combine with canary values, and MongoDB — slightly more than half the official target's total CPU at this rung — is outside the profile.
 
 The evidence is not one-sided. Rust's allocated storage grew 7.73 GiB at the 5m rung against the official target's 3.63 GiB; uncompressed on-disk state is part of the price of the write path described above.
 
@@ -155,6 +155,7 @@ node --check scripts/export_artifacts.mjs
 node --check scripts/export_canary_ladder.mjs
 node --check scripts/public_resource_evidence.mjs
 node --check scripts/profile_rollup.mjs
+node --check scripts/profile_decompose.mjs
 node --check scripts/profile_charts.mjs
 node --check scripts/canary_chart.mjs
 node --test scripts/*.test.mjs
@@ -245,6 +246,7 @@ Repeated publication matrices additionally require a Linux host running the symm
 - `scripts/linux_canary_ladder.mjs`: bounded release-candidate ladder;
 - `scripts/resource_evidence.mjs`: Linux cgroup/proc and storage/WAL accounting;
 - `scripts/profile_rollup.mjs`: official-service CPU-profile category rollup;
+- `scripts/profile_decompose.mjs`: caller re-attribution and idle structure for those profiles;
 - `scripts/profile_charts.mjs`: attribution and flamegraph figures from those profiles;
 - `scripts/canary_chart.mjs`: readiness figure from the canary summary;
 - `e2e/official-sdk/`: protocol validation using the PowerSync JavaScript packages;

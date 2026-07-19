@@ -50,6 +50,14 @@ Named categories cover 98.1% of self time; the residual `other` is dominated by 
 
 Grouped, as arithmetic on the table: `idle` — the main thread off-CPU — is 45.1% of profiled time. Of the active remainder, `bson` plus `mongodb driver`, which marshal records to and from bucket storage, are 32.9%; `postgres replication`, `sync-rules`, `jsonbig`, `mongo storage`, and `powersync service` — the service's own decode, rule-evaluation, serialization, and storage-batching code — are 22.3%; `gc` is 7.2%; and `native builtins`, `node core`, `program`, `logging`, and `other` — runtime and utility dependencies — are 37.6%.
 
+## Decomposition
+
+`scripts/profile_decompose.mjs` re-attributes the runtime buckets to the nearest categorized caller on each sampled stack and breaks the idle time into runs; [decompose.md](decompose.md) is its verbatim output. Two caveats bound it: nearest-caller attribution is a stack heuristic, not a measurement of causation, and idle runs shorter than the sampling interval are under-counted.
+
+Counted by caller, 47.6% of active CPU sits under BSON/driver call trees — the 32.9% self time plus native-builtin work they invoke, led by `utf8ByteLength` at 5.5% of active CPU with `writeCommand`, `toHex`, and UTF-8 encoding behind it. The service's own call trees carry 36.9%, and inside them `node:internal/crypto` alone is 8.6% of active CPU, called almost entirely from the service's `hashData` (5.3%), `uuidForRowBson` (1.6%), and `hashDelete` (1.5%) — per-row hashing and stable-ID derivation. `date-fns` ISO parsing and `uuid` string parsing of source rows dominate the uncategorized remainder. GC is 7.2%, logging 2.8%, and 5.6% is runtime work with no categorized caller.
+
+The idle time has structure. Over the first 90% of wall clock the thread is 41.6% idle across roughly sixty idle runs per second; the final 10% — the drain into the completion report — is 76.0% idle, which lifts the overall share to 45.1%. 91.5% of idle time sits in runs of 2–100 ms, and 68.0% of idle time immediately follows a marshalling frame. That is the shape of many short waits interleaved with driver work, consistent with storage round trips, though the profile records what ran before each wait, not what the wait blocked on.
+
 ## What the profile can and cannot say
 
 The three profiles are the main thread of container PID 1, one per iteration; no other `.cpuprofile` file was produced, and a worker thread or child Node process would have written its own. Each profile spans its container lifetime, 439.3 s to 474.7 s, within about 2.5 s of the corresponding completion window, so the shares describe the replication window rather than idle tails.
@@ -77,5 +85,6 @@ POWERSYNC_USER_VALUE_PROCESSING_ONLY=1 \
 POWERSYNC_USER_VALUE_OFFICIAL_PROFILE_DIR="$PWD/tmp/profiles/headline-5m" \
 node scripts/user_value_benchmark.mjs
 node scripts/profile_rollup.mjs tmp/profiles/headline-5m
+node scripts/profile_decompose.mjs tmp/profiles/headline-5m
 node scripts/profile_charts.mjs tmp/profiles/headline-5m docs/artifacts/official-cpu-profile-5m
 ```
