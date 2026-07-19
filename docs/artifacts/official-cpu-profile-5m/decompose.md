@@ -23,9 +23,9 @@ Self time plus runtime-bucket time re-attributed to the nearest categorized call
 
 node:internal/crypto totals 8.6% of active CPU; nearest categorized callers:
 
-- powersync service: hashData — 5.3%
-- powersync service: uuidForRowBson — 1.6%
-- powersync service: hashDelete — 1.5%
+- other service code: hashData — 5.3%
+- other service code: uuidForRowBson — 1.6%
+- other service code: hashDelete — 1.5%
 - postgres replication: snapshotTable — 0.1%
 - mongo storage: saveBucketData — 0.0%
 - postgres replication: _hash — 0.0%

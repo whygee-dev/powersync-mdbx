@@ -35,7 +35,7 @@ test('runtime leaves are re-attributed to their categorized callers', () => {
   assert.equal(state.idleMicros, 23000);
   assert.deepEqual([...state.ownerSplit.get('native builtins')], [['marshalling', 1000]]);
   assert.deepEqual([...state.ownerSplit.get('node core')], [['row processing', 1000]]);
-  assert.deepEqual([...state.cryptoCallers], [['powersync service: hashData', 1000]]);
+  assert.deepEqual([...state.cryptoCallers], [['other service code: hashData', 1000]]);
   assert.deepEqual([...state.nativeMarshallingParents], [['serializeInto', 1000]]);
   const totals = contextTotals(state);
   assert.equal(totals.get('marshalling'), 3000);
@@ -56,7 +56,7 @@ test('markdown output is deterministic and carries the headline splits', () => {
   const markdown = renderMarkdown(state);
   assert.equal(markdown, renderMarkdown(decomposeProfiles([profile])));
   assert.match(markdown, /\| marshalling \| 3\.0 \| 60\.0% \|/);
-  assert.match(markdown, /powersync service: hashData — 20\.0%/);
+  assert.match(markdown, /other service code: hashData — 20\.0%/);
   assert.match(markdown, /serializeInto — 20\.0%/);
   assert.match(markdown, /after row processing — 87\.0%/);
   assert.match(markdown, /after marshalling — 13\.0%/);

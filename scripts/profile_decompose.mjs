@@ -19,7 +19,7 @@ const OWNERS = new Map([
   ['jsonbig', 'row processing'],
   ['mongo storage', 'row processing'],
   ['postgres replication', 'row processing'],
-  ['powersync service', 'row processing'],
+  ['other service code', 'row processing'],
   ['logging', 'logging']
 ]);
 const IDLE_RUN_BUCKETS = [

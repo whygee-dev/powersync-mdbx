@@ -15,7 +15,7 @@
 | other | 8123.0 | 1.8% |
 | program | 6580.4 | 1.5% |
 | logging | 5078.5 | 1.2% |
-| powersync service | 1515.1 | 0.3% |
+| other service code | 1515.1 | 0.3% |
 
 Top `other` frames:
 
@@ -47,7 +47,7 @@ Top `other` frames:
 | other | 9094.4 | 1.9% |
 | program | 7490.2 | 1.6% |
 | logging | 5157.8 | 1.1% |
-| powersync service | 1837.5 | 0.4% |
+| other service code | 1837.5 | 0.4% |
 
 Top `other` frames:
 
@@ -79,7 +79,7 @@ Top `other` frames:
 | other | 8329.4 | 1.9% |
 | program | 7573.4 | 1.7% |
 | logging | 4960.3 | 1.1% |
-| powersync service | 1799.4 | 0.4% |
+| other service code | 1799.4 | 0.4% |
 
 Top `other` frames:
 
@@ -111,7 +111,7 @@ Top `other` frames:
 | other | 25546.8 | 1.9% |
 | program | 21644.0 | 1.6% |
 | logging | 15196.6 | 1.1% |
-| powersync service | 5152.0 | 0.4% |
+| other service code | 5152.0 | 0.4% |
 
 Top `other` frames:
 

@@ -6,8 +6,8 @@ import { pathToFileURL } from 'node:url';
 // Finalized against real 100k official-service profiles. The service is a pnpm
 // monorepo: its own code compiles under /app/{packages,modules,libs,service}/dist,
 // and dependencies resolve through /app/node_modules/.pnpm/<pkg>/node_modules/<pkg>.
-// Order matters: specific package paths precede the broad `powersync service`
-// catch-all. Keep the residual `other` bucket under 5% of aggregate self time.
+// Order matters: specific package paths precede the broad `other service code`
+// catch-all for the service's remaining monorepo code. Keep the residual `other` bucket under 5% of aggregate self time.
 const CATEGORIES = [
   { name: 'sync-rules', test: /\/app\/packages\/sync-rules\// },
   { name: 'jsonbig', test: /\/app\/packages\/jsonbig\// },
@@ -16,7 +16,7 @@ const CATEGORIES = [
     name: 'postgres replication',
     test: /\/app\/(modules\/module-postgres|libs\/lib-postgres|packages\/jpgwire)\/|\/node_modules\/pgwire\//
   },
-  { name: 'powersync service', test: /\/app\/(packages|modules|libs|service)\// },
+  { name: 'other service code', test: /\/app\/(packages|modules|libs|service)\// },
   { name: 'mongodb driver', test: /\/node_modules\/mongodb\// },
   { name: 'bson', test: /\/node_modules\/bson\// },
   { name: 'logging', test: /\/node_modules\/(winston|winston-transport|logform|triple-beam|safe-stable-stringify|@colors)\// }
