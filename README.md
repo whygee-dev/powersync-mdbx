@@ -93,7 +93,7 @@ Memory values are cgroup lifetime peaks, so MongoDB includes provisioning before
 
 ### Reading the results
 
-The resource evidence constrains how the ratios can be explained. The following observations are arithmetic on the recorded values.
+The resource evidence constrains how the ratios can be explained. The following observations are arithmetic on the recorded values, except the profiling paragraph, which cites its own labeled diagnostic artifact.
 
 Both targets scale close to linearly. Official protocol readiness stays between 63.5 and 81.8 s per million source task rows across the rungs, Rust between 5.8 and 7.0 s per million, and the ratio between 10.8x and 11.9x over a twentyfold row-count range. The measured difference is a per-row cost factor, not a difference in asymptotic behavior.
 
@@ -101,15 +101,17 @@ The CPU gap is larger than the elapsed-time gap. At the 5m rung the official tar
 
 Moving derived state dominates the official target's traffic. Within the 5m initial window MongoDB's receive counter recorded 9.31 GiB, matching the service's transmit; the Rust service, whose inbound traffic is essentially the PostgreSQL scan, received 1.27 GiB and transmitted 2.6 MiB. Its derived writes go to the in-process MDBX map and never cross a socket. Peak memory shows the same shape: 90 MiB for Rust against 274 MiB for the official service plus 5,922 MiB for MongoDB.
 
+A separate diagnostic run attributes part of the official target's CPU cost directly. V8 CPU profiles of the service's main thread, captured with the [profiling recipe](docs/benchmark.md) over three initial replications of the 5m fixture and rolled up in the [profile artifact](docs/artifacts/official-cpu-profile-5m/README.md), record that thread off-CPU for 45.1% of profiled time even with the container's CPU limit removed. Of its active CPU, BSON encoding and the MongoDB driver — marshalling derived state to and from bucket storage — took 32.9%, more than the service's own row processing — Postgres decode, sync-rules evaluation, JSON serialization, storage batching, and service glue — at 22.3%; garbage collection observed on that thread took 7.2%, and Node/V8 runtime and utility dependencies the remaining 37.6%. The profiled topology was official-only and uncapped, so these shares do not combine with canary values, and MongoDB — slightly more than half the official target's total CPU at the 5m rung — is outside the profile.
+
 The evidence is not one-sided. Rust's allocated storage grew 7.73 GiB at the 5m rung against the official target's 3.63 GiB; uncompressed on-disk state is part of the price of the write path described above.
 
-The following are hypotheses consistent with those signals, not measurements of the official implementation: per-operation serialization and client/server round trips between the service and its storage engine; persistence of per-operation history with checkpoint checksums computed from stored operations, where this implementation writes current state once and maintains incremental accumulators; and per-row overhead of a garbage-collected runtime in the materialization loop. The canary cannot rank these, and as stated in Motivation, a comparison that changes the language, runtime, storage engine, and data layout at once cannot isolate any one of them as the cause.
+What remains hypothesis rather than measurement: whether the idle main thread is waiting on storage round trips, how MongoDB spends its server-side CPU, and the cost of persisting per-operation history with checkpoint checksums computed from stored operations, where this implementation writes current state once and maintains incremental accumulators. As stated in Motivation, a comparison that changes the language, runtime, storage engine, and data layout at once cannot isolate any one component as the cause of the end-to-end ratio.
 
 The canary took 16 minutes 52 seconds and retained about 13 GiB locally. It ran in Docker Desktop's Linux VM rather than on controlled native Linux hardware. Official, MongoDB, and PostgreSQL images were digest-pinned; the locally built Rust image was executed and recorded by immutable image ID. A repeated, counterbalanced native-Linux matrix remains the appropriate next step for distributional performance claims.
 
 Local release checks passed 255 Rust tests, four live PostgreSQL replication tests, and 69 Node harness/export/ladder tests, along with formatting, warnings-denied Clippy, dependency audits, and the frontend build.
 
-The other compact artifacts under `docs/artifacts/` are older exploratory runs from asymmetric topologies and earlier implementation revisions. The [benchmark methodology](docs/benchmark.md) defines the claim boundary for each result.
+The other compact artifacts under `docs/artifacts/` are the CPU-profile rollup above and older exploratory runs from asymmetric topologies and earlier implementation revisions. The [benchmark methodology](docs/benchmark.md) defines the claim boundary for each result.
 
 ## Build and test
 
@@ -222,6 +224,7 @@ Repeated publication matrices additionally require a Linux host running the symm
 - `scripts/official_resource_calibration.mjs`: counterbalanced 250k official-service resource calibration;
 - `scripts/linux_canary_ladder.mjs`: bounded release-candidate ladder;
 - `scripts/resource_evidence.mjs`: Linux cgroup/proc and storage/WAL accounting;
+- `scripts/profile_rollup.mjs`: official-service CPU-profile category rollup;
 - `e2e/official-sdk/`: protocol validation using the PowerSync JavaScript packages;
 - `docs/`: scope, correctness boundary, methodology, and historical artifacts.
 
